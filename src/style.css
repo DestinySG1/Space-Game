@@ -62,6 +62,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .slot:first-of-type { border-top: 0; }
 .slot > b { display: block; }
 .tag { font-size: 11px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.form { display: grid; gap: 6px; }
+.form input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: inherit; }
+.form input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.warn-card { border-color: var(--cr); }
 .chk { display: flex; gap: 8px; align-items: center; padding: 4px 0; cursor: pointer; }
 
 .res { font-variant-numeric: tabular-nums; white-space: nowrap; }

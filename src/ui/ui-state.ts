@@ -1,7 +1,8 @@
 import type { Vec } from '../game/types';
+import type { CloudView } from '../net/cloud';
 import { newCamera, type Camera } from './camera';
 
-export type Tab = 'select' | 'yard' | 'research' | 'expedition' | 'log';
+export type Tab = 'select' | 'yard' | 'research' | 'expedition' | 'log' | 'account';
 
 export interface UIState {
   view: 'home' | 'expedition';
@@ -15,6 +16,7 @@ export interface UIState {
   toast: { msg: string; ok: boolean; until: number } | null;
   confirmReset: boolean;
   cams: { home: Camera; expedition: Camera };
+  cloud: CloudView | null; // set by main once the cloud client exists
 }
 
 export const initialUI = (): UIState => ({
@@ -29,4 +31,5 @@ export const initialUI = (): UIState => ({
   toast: null,
   confirmReset: false,
   cams: { home: newCamera(6), expedition: newCamera(5) },
+  cloud: null,
 });

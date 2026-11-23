@@ -1,0 +1,29 @@
+# Start: docker compose up -d --build   (DOMAIN comes from .env, see .env.example)
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - lumen-data:/data          # SQLite database with accounts and saves
+    expose:
+      - "8787"
+
+  caddy:                          # HTTPS with automatic Let's Encrypt certificates
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:?Bitte DOMAIN in .env setzen}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  lumen-data:
+  caddy-data:
+  caddy-config:

@@ -51,7 +51,7 @@ export function topbar(s: GameState, ui: UIState): string {
 
 export function tabs(ui: UIState): string {
   const t: [UIState['tab'], string][] = [
-    ['select', 'Auswahl'], ['yard', 'Werft'], ['research', 'Module'], ['expedition', 'Expedition'], ['log', 'Logbuch'],
+    ['select', 'Auswahl'], ['yard', 'Werft'], ['research', 'Module'], ['expedition', 'Expedition'], ['log', 'Logbuch'], ['account', 'Konto'],
   ];
   return t.map(([id, name]) => `<button class="tab ${ui.tab === id ? 'on' : ''}" data-action="tab" data-arg="${id}">${name}</button>`).join('');
 }
@@ -63,6 +63,7 @@ export function panel(s: GameState, ui: UIState): string {
     case 'research': return researchPanel(s);
     case 'expedition': return expeditionPanel(s, ui);
     case 'log': return logPanel(s, ui);
+    case 'account': return accountPanel(ui);
   }
 }
 
@@ -311,6 +312,47 @@ function expeditionPanel(s: GameState, ui: UIState): string {
       <div class="muted small" style="margin-top:8px">Sprungtreibstoff: ${cost({ hydrogen: fuel })} (${CONFIG.hydrogen.jumpPerShip * tier} pro Schiff)</div>
       ${btn('launch', !have ? 'Erst einen Sprungkern schmieden' : !fuelOk ? 'Zu wenig Wasserstoff' : 'Sprung!', { kind: 'primary', disabled: !have || !fuelOk || ui.launch.length === 0 })}
     </div>${last}${forge}`;
+}
+
+const clock = (ms: number) => new Date(ms).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+
+function accountPanel(ui: UIState): string {
+  const c = ui.cloud;
+  if (!c || c.available === null) return '<h2>Konto</h2><p class="muted">Suche den Server …</p>';
+  if (!c.available) {
+    return `<h2>Konto</h2>
+      <p>Online-Funktionen gibt es nur, wenn das Spiel von deinem Server geladen wird.
+      Hier läuft es ohne Server: Der Spielstand bleibt in diesem Browser.</p>
+      <p class="muted small">Anleitung zur Einrichtung: <b>docs/SERVER.md</b> im Repository.</p>`;
+  }
+  const msg = c.msg ? `<p class="small">${esc(c.msg)}</p>` : '';
+  if (!c.name) {
+    return `<h2>Konto</h2>
+      <p class="muted small">Mit einem Konto wird dein Spielstand auf dem Server gesichert, und du spielst auf jedem Gerät weiter.</p>
+      <form id="account-form" class="card form" autocomplete="on">
+        <label for="acc-name">Name</label>
+        <input id="acc-name" name="username" autocomplete="username" minlength="3" maxlength="20" required>
+        <label for="acc-pass">Passwort (mindestens 8 Zeichen)</label>
+        <input id="acc-pass" name="password" type="password" autocomplete="current-password" minlength="8" required>
+        <div class="row">
+          <button class="btn primary" type="submit" value="login" ${c.busy ? 'disabled' : ''}>Anmelden</button>
+          <button class="btn" type="submit" value="register" ${c.busy ? 'disabled' : ''}>Neues Konto</button>
+        </div>
+      </form>${msg}`;
+  }
+  const choice = c.choice
+    ? `<div class="card warn-card"><b>Zwei verschiedene Spielstände</b>
+        <p class="small">Auf dem Server liegt ein Spielstand vom ${clock(c.choice.savedAt)}, der nicht von diesem Gerät stammt.
+        Welcher soll weitergelten? Der andere wird überschrieben.</p>
+        <div class="row">${btn('cloudTake', 'Server-Stand laden', { arg: 'server', kind: 'primary', disabled: c.busy })}
+        ${btn('cloudTake', 'Diesen Stand behalten', { arg: 'local', disabled: c.busy })}</div></div>`
+    : '';
+  return `<h2>Konto</h2>
+    <div class="card">Angemeldet als <b>${esc(c.name)}</b>
+      <div class="muted small">${c.lastSync ? `Zuletzt gesichert: ${clock(c.lastSync)}` : 'Noch nicht gesichert.'} Automatische Sicherung jede Minute.</div></div>
+    ${choice}
+    <div class="row">${btn('cloudSave', 'Jetzt sichern', { disabled: c.busy || !!c.choice })} ${btn('cloudLogout', 'Abmelden', { kind: 'ghost', disabled: c.busy })}</div>
+    ${msg}`;
 }
 
 function logPanel(s: GameState, ui: UIState): string {

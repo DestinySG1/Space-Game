@@ -15,6 +15,11 @@ npm run build      # eine einzelne, eigenständige dist/index.html
 npm run balance    # Balancing-Bots: Heimat-Fortschritt und Expeditions-Überleben
 ```
 
+## Eigener Server (Konten, Cloud-Spielstand, Koop)
+
+Mit Docker auf einem eigenen Server: siehe **[docs/SERVER.md](docs/SERVER.md)**. Kurzfassung:
+`.env.example` nach `.env` kopieren, `DOMAIN` eintragen, `docker compose up -d --build`.
+
 ## Spielen
 
 - Karte ziehen zum Verschieben, Mausrad / zwei Finger / Buttons +, −, ⌂ zum Zoomen.
@@ -42,6 +47,8 @@ src/game/      reine Spiellogik, ohne DOM (testbar)
   sim.ts       fester Zeitschritt, Speichern/Laden, Offline-Fortschritt
 src/ui/        Canvas-Rendering (render.ts), Grafiken (sprites.ts), Kamera (camera.ts), Seitenpanel
 tests/         Vitest
+server/        Node.js-Server: Konten, Cloud-Spielstände (SQLite), liefert das Spiel aus
+deploy/        Caddy-Konfiguration für HTTPS
 scripts/       Balancing-Bots
 docs/DESIGN.md Spieldesign, Kreisläufe, Formeln, gemessenes Balancing
 ```

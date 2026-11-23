@@ -11,6 +11,7 @@ import { panel, tabs, topbar } from './ui/panel';
 import { resetCamera, zoomAt } from './ui/camera';
 import { drawExpedition, drawHome, toWorld, type DrawResult } from './ui/render';
 import { initialUI, type Tab } from './ui/ui-state';
+import { Cloud } from './net/cloud';
 
 function storage(): Storage | null {
   try {
@@ -135,6 +136,33 @@ canvas.addEventListener('pointerdown', (e) => {
   else gesture.moved = true; // a second finger means pinch, never a tap
 });
 
+// ---- cloud saves on the player's own server ------------------------------------------
+
+const cloud = new Cloud(
+  () => s,
+  (next, note) => {
+    s = next;
+    ui.selShip = null;
+    ui.selNode = null;
+    save(s, storage());
+    toast(note, true);
+  },
+  () => refreshPanel(true),
+);
+ui.cloud = cloud.view;
+void cloud.start();
+setInterval(() => void cloud.push(), 60_000);
+
+document.addEventListener('submit', (e) => {
+  const form = e.target as HTMLFormElement;
+  if (form.id !== 'account-form') return;
+  e.preventDefault();
+  const mode = (e as SubmitEvent).submitter?.getAttribute('value') === 'register' ? 'register' : 'login';
+  const name = (form.querySelector('#acc-name') as HTMLInputElement).value.trim();
+  const pass = (form.querySelector('#acc-pass') as HTMLInputElement).value;
+  void cloud.signIn(mode, name, pass);
+});
+
 canvas.addEventListener('pointermove', (e) => {
   const prev = pointers.get(e.pointerId);
   if (!prev) {
@@ -248,6 +276,9 @@ document.addEventListener('click', (e) => {
     }
     case 'jump': run(A.jump(s, arg)); ui.selShip = null; break;
     case 'jumpAll': run(A.jumpAllAtGate(s)); break;
+    case 'cloudSave': void cloud.push().then((ok) => toast(ok ? 'Auf dem Server gesichert.' : 'Sichern nicht möglich.', ok)); break;
+    case 'cloudLogout': void cloud.signOut(); break;
+    case 'cloudTake': void cloud.choose(arg === 'server' ? 'server' : 'local'); break;
     case 'recall': run(A.recallAllToGate(s)); break;
     case 'reset': ui.confirmReset = true; break;
     case 'resetNo': ui.confirmReset = false; break;
@@ -318,5 +349,8 @@ requestAnimationFrame(frame);
 setInterval(() => refreshPanel(), 250);
 setInterval(() => save(s, storage()), 5000);
 document.addEventListener('visibilitychange', () => document.hidden && save(s, storage()));
-window.addEventListener('pagehide', () => save(s, storage()));
+window.addEventListener('pagehide', () => {
+  save(s, storage());
+  void cloud.push(false, true);
+});
 refreshPanel(true);
