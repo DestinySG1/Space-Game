@@ -1,0 +1,26 @@
+{
+  "name": "lumen-reach",
+  "version": "0.1.0",
+  "description": "Weltraum-Strategie: Heimat-Sektor aufbauen, 15-Minuten-Expeditionen fliegen.",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc",
+    "balance": "vite-node scripts/balance.ts && vite-node scripts/expedition-probe.ts"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^6.4.6",
+    "vite-plugin-singlefile": "^2.3.4",
+    "vitest": "^3.2.7"
+  },
+  "private": true,
+  "type": "module"
+}

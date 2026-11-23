@@ -1,0 +1,118 @@
+# Lumen Reach – Game Design (Prototyp 0.1)
+
+Weltraum-Strategie mit zwei Ebenen: ein **Heimat-Sektor**, der dauerhaft (auch offline) wächst, und
+**Expeditionen** von 15 Minuten, aus denen die seltene Ressource kommt, die den Fortschritt antreibt.
+
+Alle Zahlen stehen in `src/game/config.ts`, alle Formeln in `src/game/economy.ts`.
+Zum Balancen nur dort ändern und danach `npm run balance` laufen lassen.
+
+## Kernkreislauf
+
+```
+ Kolonien ─┐
+ Handel  ──┼─► Credits ──┐
+ Abbau   ──┘   Erz ──────┼─► Ausbau · Schiffe · Sprungkerne · Forschung
+                         │                         │
+                         │            Sprungkern ──▼
+                         │                  Expedition (15 min)
+                         │                         │
+                         └──── Echo-Splitter ◄─────┘
+                               (nur aus Expeditionen, gaten die Forschung ab Stufe 2)
+```
+
+- **Credits** und **Erz** kommen aus dem Heimat-Sektor (passiv und mit Schiffen).
+- **Echo-Splitter** gibt es nur in Expeditionen. Sie sind der Engpass für Forschung, also für stärkere
+  Schiffe, also für höhere Expeditionsstufen. Das verbindet beide Ebenen.
+
+## Heimat-Sektor
+
+Hexkarte (Radius 4) mit Heimatbasis in der Mitte, 6 Planeten, 3 Handelsposten, 4 Asteroidengürteln.
+Die Lage wird aus einem Seed erzeugt.
+
+| Element | Funktion | Formel |
+|---|---|---|
+| Planet (Garten) | Credits passiv | `0,5 × Stufe^1,15` pro s |
+| Planet (Fels) | Erz passiv | `0,15 × Stufe^1,15` pro s |
+| Kolonisieren | n-ter Planet | `250 × 1,7^n` Credits |
+| Ausbau Stufe L → L+1 | | `180 × 1,75^(L−1)` Cr, `30 × 1,75^(L−1)` Erz |
+| Handelsposten | erzeugt Waren | `0,12/s`, Lager max. 30 |
+| Warenwert | pro Einheit beim Verkauf an anderem Posten | `(6 + 4 × Distanz) × Handelsnetz-Bonus` |
+| Asteroidengürtel | Erz-Vorrat 400, wächst `0,3/s` nach | |
+
+**Pendelrouten** automatisieren Schiffe: Frachter zwischen zwei Posten, Schürfer zwischen Gürtel und
+Basis. Sie sind der Hauptgrund, warum der Sektor offline weiterarbeitet.
+
+**Offline-Fortschritt:** beim Laden wird bis zu 8 h Heimat-Sektor nachsimuliert. Eine laufende
+Expedition pausiert, solange das Spiel zu ist (Designentscheidung: niemand verliert Schiffe im Schlaf).
+
+## Schiffe
+
+| | Frachter | Schürfer | Wächter |
+|---|---|---|---|
+| Kosten | 400 Cr | 500 Cr, 50 Erz | 800 Cr, 120 Erz |
+| Rumpf / Schild | 500 / 100 | 450 / 100 | 1500 / 500 |
+| Schaden | – | – | 60/s |
+| Ladung Heimat | 6 Waren | 60 Erz | – |
+| Ladung Expedition | 40 Splitter | 20 Splitter | 4 Splitter |
+| Abbau | – | 0,5 Erz/s · 0,08 Splitter/s | – |
+
+Hangarplätze: `3 + Hangarstufe`. Ausbau `1200 × 2^Stufe` Cr und `200 × 2^Stufe` Erz.
+
+## Forschung (Module)
+
+8 Module, je 5 Stufen. Stufe L → L+1 kostet `300 × 2^L` Credits, `60 × 2^L` Erz,
+Splitter `0` für Stufe 1, danach `6 × 1,9^(L−1)`, Dauer `30 × 1,7^L` s.
+
+| Modul | Bonus pro Stufe |
+|---|---|
+| Laderaum | +25 % Kapazität |
+| Handelsnetz | +12 % Warenwert |
+| Bohrkopf | +25 % Abbaurate |
+| Triebwerke | +10 % Tempo |
+| Panzerung | +20 % Rumpf |
+| Schildgitter | +25 % Schild |
+| Pulskanonen | +20 % Schaden |
+| Tiefenscanner | +10 % Splitter in Vorkommen |
+
+## Expeditionen
+
+1. In der Schmiede einen **Sprungkern** der Stufe T herstellen: `500 × 1,7^(T−1)` Cr,
+   `100 × 1,7^(T−1)` Erz.
+2. Bis zu 4 Schiffe auswählen und springen. Die Schiffe fehlen solange im Heimat-Sektor.
+3. Karte: Radius 4, Sprungtor in der Mitte, `7 + T` Splitter-Vorkommen mit je
+   `10–18 × T^1,3 × Scanner` Splittern.
+4. **Gegnerwellen** ab Sekunde 60, alle 55 s, vom Kartenrand.
+   - Anzahl: `1 + ⌊Welle / 5⌋ + ⌊(T−1) / 2⌋`
+   - Stärke: `(1 + 0,35 × (T−1)) × (1 + 0,5 × verstrichene Zeit / Dauer)`
+   - Splitterling (220 HP, 10 Schaden/s, schnell); ab Welle 10 in ungeraden Wellen ein Koloss
+     (1200 HP, 30 Schaden/s, langsam).
+5. Schürfer bauen auf Vorkommen ab, Frachter auf demselben Feld übernehmen die Splitter automatisch.
+6. **Heimsprung** nur vom Sprungtor. Mitgebrachte Splitter werden gutgeschrieben.
+7. Nach 15 Minuten kollabiert die Anomalie: Alle Schiffe, die noch drin sind, gehen **mit Ladung**
+   verloren. Zerstörte Schiffe sind ebenfalls weg.
+8. Wer auf Stufe T mindestens `25 × T` Splitter sichert, schaltet Stufe T+1 frei.
+
+Die Spannung entsteht aus **Gier gegen Sicherheit**: Die Gegner werden mit der Zeit stärker, die
+Ausbeute steigt aber mit jeder Minute.
+
+### Gemessenes Balancing (`npm run balance`)
+
+| Flotte | Ergebnis |
+|---|---|
+| T1 ohne Wächter | nach ca. 2 min verloren |
+| T1, 1 Wächter + Schürfer + Frachter | 40–56 Splitter; wer bis ca. 12,5 min bleibt, riskiert Verluste |
+| T2–T3, 1 Wächter | verloren nach ca. 9–11 min, früher gehen oder aufrüsten |
+| T3, 2 Wächter, Forschung 2 | sicher, ca. 88 Splitter |
+| T5, 2 Wächter, Forschung 3 | riskant |
+
+Der Heimat-Bot erreicht die erste Expedition nach etwa 8 Minuten Spielzeit.
+
+## Nächste Ausbaustufen (Ideen)
+
+- Mehr Gegnertypen, Gegner mit Fähigkeiten, Boss am Ende höherer Stufen
+- Aktive Module (Schildblase, Teleport zum Tor, Tarnung) mit Abklingzeit
+- Mehrere Sektoren / Sektorkarte, die sich mit der Zeit erweitert
+- Koop-Expeditionen (Server nötig), Allianzen, gemeinsame Ziele
+- Handel mit Ladungsarten und schwankenden Preisen
+- Tägliche Ereignisse, Erfolge, Tutorial
+- Grafik: Sprites/Shader statt Canvas-Formen, Sound

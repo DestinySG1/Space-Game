@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Lumen Reach</title>
+  </head>
+  <body>
+    <div class="app">
+      <header id="top" class="top"></header>
+      <main class="mapwrap">
+        <canvas id="map" aria-label="Sternenkarte"></canvas>
+        <div id="speed" class="speed"></div>
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      </main>
+      <aside class="side">
+        <nav id="tabs" class="tabs"></nav>
+        <section id="panel" class="panel"></section>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
