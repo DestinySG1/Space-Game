@@ -5,7 +5,7 @@ import { insideMap } from './game/geom';
 import { pixelToHex } from './game/hex';
 import { load, save, step } from './game/sim';
 import { isExplored, newGame, nodeNear, shipById } from './game/state';
-import type { GameState, ModuleId, ShipType, Vec } from './game/types';
+import type { GameState, ModuleId, ShipType, SlotType, Vec } from './game/types';
 import { fmtTime } from './ui/format';
 import { panel, tabs, topbar } from './ui/panel';
 import { resetCamera, zoomAt } from './ui/camera';
@@ -229,6 +229,8 @@ document.addEventListener('click', (e) => {
     case 'hangar': run(A.upgradeHangar(s)); break;
     case 'build': run(A.buildShip(s, arg as ShipType)); break;
     case 'research': run(A.research(s, arg as ModuleId)); break;
+    case 'equip': { const [id, slot, mod] = arg.split('|'); run(A.equip(s, id, slot as SlotType, (mod || null) as ModuleId | null)); break; }
+    case 'activate': run(A.activate(s, arg)); break;
     case 'beacon': run(A.craftBeacon(s, Number(arg))); break;
     case 'shuttle': { const [id, target] = arg.split('|'); run(A.setShuttle(s, id, target)); break; }
     case 'stopShuttle': run(A.stopShuttle(s, arg)); break;

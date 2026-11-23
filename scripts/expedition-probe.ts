@@ -12,9 +12,19 @@ import type { ShipType } from '../src/game/types';
 function run(tier: number, fleet: ShipType[], research = 0, seed = 1) {
   const s = newGame(seed);
   s.ships = [];
-  for (const k of Object.keys(s.modules) as (keyof typeof s.modules)[]) s.modules[k] = research;
+  for (const k of Object.keys(s.blueprints) as (keyof typeof s.blueprints)[]) s.blueprints[k] = research;
   const ids = fleet.map((t) => addShip(s, t).id);
+  if (research > 0) {
+    // a sensible fit: lance + deflector on wardens, drill / cargo rings on the others
+    for (const ship of s.ships) {
+      ship.fit.shield = 'deflector';
+      if (ship.type === 'warden') ship.fit.weapon = 'lance';
+      if (ship.type === 'miner') ship.fit.mining = 'drill';
+      if (ship.type === 'hauler') ship.fit.trade = 'cargo';
+    }
+  }
   s.beacons[tier] = 1;
+  s.hydrogen = 1e6; // the probe measures combat, not fuel
   s.maxTier = tier;
   A.launchExpedition(s, tier, ids, seed * 7);
   const ex = s.expedition!;

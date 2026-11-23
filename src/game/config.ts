@@ -1,11 +1,11 @@
 // All balancing numbers live here. Change values, not code, to tune the economy.
 // Rates are per second of game time unless noted otherwise.
 
-import type { ModuleId, ShipType } from './types';
+import type { ModuleId, ShipType, SlotType } from './types';
 
 export const CONFIG = {
   saveKey: 'lumen-reach-save-v1',
-  saveVersion: 4,
+  saveVersion: 5,
   tick: 0.1, // fixed simulation step in seconds
   offlineCapSeconds: 8 * 3600,
 
@@ -125,6 +125,9 @@ export const CONFIG = {
     timeStrength: 0.5, // enemy stat bonus at the very end of the timer
     collapseWarning: 90,
     unlockShardsPerTier: 25, // bank this many * tier to unlock the next tier
+    pulseRadius: 6,
+    pulseStun: 3,
+    droneRadius: 5,
   },
 
   enemies: {
@@ -150,18 +153,38 @@ export interface ShipConfig {
 
 export interface ModuleInfo {
   id: ModuleId;
+  slot: SlotType;
   name: string;
   desc: string;
-  perLevel: number; // fractional bonus per level, e.g. 0.2 = +20 %
+  perLevel: number; // bonus per blueprint level (meaning depends on the module, see economy.ts)
+  cooldown?: number; // active modules: seconds between uses
 }
 
+/** Which module slots each ship type has. */
+export const SLOTS: Record<ShipType, SlotType[]> = {
+  hauler: ['trade', 'shield'],
+  miner: ['mining', 'shield'],
+  warden: ['weapon', 'shield', 'support'],
+};
+
+export const SLOT_NAMES: Record<SlotType, string> = {
+  weapon: 'Waffe', shield: 'Schild', support: 'Unterstützung', trade: 'Handel', mining: 'Abbau',
+};
+
 export const MODULES: ModuleInfo[] = [
-  { id: 'cargoBay', name: 'Laderaum', desc: 'Frachtkapazität aller Schiffe', perLevel: 0.25 },
-  { id: 'tradeLink', name: 'Handelsnetz', desc: 'Credits pro gelieferter Ware', perLevel: 0.12 },
-  { id: 'drillHead', name: 'Bohrkopf', desc: 'Abbaurate von Erz und Splittern', perLevel: 0.25 },
-  { id: 'engines', name: 'Triebwerke', desc: 'Geschwindigkeit aller Schiffe', perLevel: 0.1 },
-  { id: 'armor', name: 'Panzerung', desc: 'Rumpfpunkte aller Schiffe', perLevel: 0.2 },
-  { id: 'shields', name: 'Schildgitter', desc: 'Schildstärke aller Schiffe', perLevel: 0.25 },
-  { id: 'cannons', name: 'Pulskanonen', desc: 'Schaden der Wächter', perLevel: 0.2 },
-  { id: 'scanner', name: 'Tiefenscanner', desc: 'Splitter in Expeditions-Vorkommen', perLevel: 0.1 },
+  { id: 'lance', slot: 'weapon', name: 'Phasenlanze', desc: 'Konzentrierter Strahl auf ein Ziel: +35 % Schaden pro Stufe', perLevel: 0.35 },
+  { id: 'scatter', slot: 'weapon', name: 'Streukanone', desc: 'Trifft bis zu 3 Ziele gleichzeitig mit je 50 % Schaden, +15 % pro Stufe', perLevel: 0.15 },
+  { id: 'deflector', slot: 'shield', name: 'Deflektor', desc: '+40 % Schildstärke pro Stufe', perLevel: 0.4 },
+  { id: 'regen', slot: 'shield', name: 'Regenerator', desc: 'Schild lädt schon nach 1,5 s nach, +60 % Laderate pro Stufe', perLevel: 0.6 },
+  { id: 'plating', slot: 'shield', name: 'Verbundpanzerung', desc: '+25 % Rumpfpunkte pro Stufe', perLevel: 0.25 },
+  { id: 'pulse', slot: 'support', name: 'Störimpuls', desc: 'Aktiv: lähmt Gegner im Umkreis von 6 für 3 s, +0,6 s pro Stufe', perLevel: 0.6, cooldown: 60 },
+  { id: 'blink', slot: 'support', name: 'Notsprung', desc: 'Aktiv: springt sofort zum Sprungtor. Abklingzeit 150 s, −15 s pro Stufe', perLevel: 15, cooldown: 150 },
+  { id: 'drone', slot: 'support', name: 'Reparaturdrohne', desc: 'Repariert Schiffe im Umkreis von 5 um 6 Rumpf/s pro Stufe', perLevel: 6 },
+  { id: 'thrusters', slot: 'support', name: 'Schubdüsen', desc: '+15 % Tempo pro Stufe', perLevel: 0.15 },
+  { id: 'cargo', slot: 'trade', name: 'Frachtringe', desc: '+30 % Laderaum pro Stufe', perLevel: 0.3 },
+  { id: 'broker', slot: 'trade', name: 'Handelsrechner', desc: '+15 % Credits pro gelieferter Ware pro Stufe', perLevel: 0.15 },
+  { id: 'drill', slot: 'mining', name: 'Bohrlaser', desc: '+30 % Abbaurate (Erz und Splitter) pro Stufe', perLevel: 0.3 },
+  { id: 'bunker', slot: 'mining', name: 'Erzbunker', desc: '+35 % Laderaum des Schürfers pro Stufe', perLevel: 0.35 },
 ];
+
+export const moduleInfo = (id: ModuleId) => MODULES.find((m) => m.id === id)!;

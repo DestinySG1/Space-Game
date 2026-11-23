@@ -1,7 +1,7 @@
 # Lumen Reach
 
 Weltraum-Strategie im Browser: Baue deinen **Heimat-Sektor** aus (Kolonien, Handel, Bergbau) und
-fliege **15-Minuten-Expeditionen** in Anomalien, um Echo-Splitter für die Forschung zu holen.
+fliege **15-Minuten-Expeditionen** in Anomalien, um Echo-Splitter für Modul-Baupläne zu holen.
 
 Prototyp 0.1 – TypeScript, Canvas, keine Laufzeit-Abhängigkeiten.
 
@@ -25,7 +25,8 @@ npm run balance    # Balancing-Bots: Heimat-Fortschritt und Expeditions-Überleb
 - Der schwarze Nebel ist unerforscht: Schiff hineinschicken, um das Feld aufzudecken.
 - Planeten antippen → kolonisieren und ausbauen. Gasriesen antippen → Raffinerie für Wasserstoff
   (Treibstoff) bauen.
-- *Werft*: Schiffe bauen, Hangar erweitern. *Forschung*: Module. *Expedition*: Sprungkern
+- *Werft*: Schiffe bauen, Hangar erweitern. *Module*: Baupläne entschlüsseln; eingebaut werden sie
+  im Schiffspanel unter *Auswahl*. *Expedition*: Sprungkern
   schmieden, Flotte wählen, springen.
 - Unten links: **Testtempo** 1× / 10× / 60× zum schnellen Ausprobieren.
 

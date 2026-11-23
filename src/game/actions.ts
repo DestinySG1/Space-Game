@@ -1,14 +1,14 @@
 // Everything the player can do. Each action validates, changes state and returns a message for the UI.
-import { CONFIG, MODULES } from './config';
+import { CONFIG, SLOTS, moduleInfo } from './config';
 import {
   beaconCost, canAfford, colonizeCost, hangarSlots, hangarUpgradeCost, jumpFuel, pay, planetUpgradeCost, refineryCost,
-  refineryUpgradeCost, researchCost, shipCost,
+  moduleCooldown, refineryUpgradeCost, researchCost, shipCost,
 } from './economy';
-import { GATE_POS, canJump, createExpedition, expeditionShips, gateSpot, jumpHome } from './expedition';
+import { GATE_POS, canJump, createExpedition, expeditionShips, gateSpot, inRange, jumpHome } from './expedition';
 import { dist, insideMap } from './geom';
 import { dockAt, sendTo } from './home';
 import { isExplored, log, nodeById, nodeNear, shipById } from './state';
-import type { GameState, ModuleId, ShipType, Vec } from './types';
+import type { GameState, ModuleId, Ship, ShipType, SlotType, Vec } from './types';
 
 export interface Result {
   ok: boolean;
@@ -84,14 +84,55 @@ export function buildShip(s: GameState, type: ShipType): Result {
   return ok(`${CONFIG.ships[type].name} wird gebaut.`);
 }
 
+/** Decode the next level of a module blueprint (needs shards from level 2 on). */
 export function research(s: GameState, id: ModuleId): Result {
-  if (s.queue.research) return fail('Es läuft bereits eine Forschung.');
-  if (s.modules[id] >= CONFIG.research.maxLevel) return fail('Maximale Stufe erreicht.');
+  if (s.queue.research) return fail('Es wird bereits ein Bauplan entschlüsselt.');
+  if (s.blueprints[id] >= CONFIG.research.maxLevel) return fail('Maximale Stufe erreicht.');
   const c = researchCost(s, id);
   if (!canAfford(s, c)) return fail(notEnough);
   pay(s, c);
   s.queue.research = { kind: 'research', target: id, remaining: c.time, total: c.time };
-  return ok(`Forschung an ${MODULES.find((m) => m.id === id)!.name} gestartet.`);
+  return ok(`Bauplan ${moduleInfo(id).name} wird entschlüsselt.`);
+}
+
+/** Install a module in the matching slot of a ship, or clear the slot with id = null. */
+export function equip(s: GameState, shipId: string, slot: SlotType, id: ModuleId | null): Result {
+  const ship = shipById(s, shipId);
+  if (!ship) return fail('Schiff nicht gefunden.');
+  if (ship.location !== 'home') return fail('Module können nur im Heimat-Sektor gewechselt werden.');
+  if (!SLOTS[ship.type].includes(slot)) return fail('Dieses Schiff hat keinen solchen Platz.');
+  if (id === null) {
+    delete ship.fit[slot];
+    return ok('Modul ausgebaut.');
+  }
+  const m = moduleInfo(id);
+  if (m.slot !== slot) return fail('Das Modul passt nicht in diesen Platz.');
+  if (s.blueprints[id] < 1) return fail('Erst den Bauplan entschlüsseln.');
+  ship.fit[slot] = id;
+  return ok(`${m.name} in ${ship.name} eingebaut.`);
+}
+
+/** Seconds until an active module on this ship can be used again (0 = ready). */
+export const cooldownLeft = (s: GameState, ship: Ship, id: ModuleId) => Math.max(0, (ship.cooldowns[id] ?? 0) - s.time);
+
+/** Use the active support module of a ship in an expedition. */
+export function activate(s: GameState, shipId: string): Result {
+  const ship = shipById(s, shipId);
+  const ex = s.expedition;
+  if (!ship || !ex || ship.location !== 'expedition') return fail('Nur in einer Expedition einsetzbar.');
+  const id = ship.fit.support;
+  if (!id || !moduleInfo(id).cooldown) return fail('Kein aktives Modul eingebaut.');
+  if (cooldownLeft(s, ship, id) > 0) return fail(`Noch ${Math.ceil(cooldownLeft(s, ship, id))} s Abklingzeit.`);
+  ship.cooldowns[id] = s.time + moduleCooldown(s, id);
+  if (id === 'pulse') {
+    const until = s.time + CONFIG.expedition.pulseStun + moduleInfo('pulse').perLevel * (s.blueprints.pulse - 1);
+    const hit = inRange(ex.enemies, ship.pos, CONFIG.expedition.pulseRadius);
+    for (const en of hit) en.stunnedUntil = until;
+    return ok(`Störimpuls: ${hit.length} Gegner gelähmt.`);
+  }
+  ship.pos = gateSpot(ship);
+  ship.target = null;
+  return ok(`${ship.name} ist zum Sprungtor gesprungen.`);
 }
 
 export function craftBeacon(s: GameState, tier: number): Result {

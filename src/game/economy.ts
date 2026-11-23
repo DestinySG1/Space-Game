@@ -1,7 +1,7 @@
 // Pure formulas: costs, production and ship stats. No state is changed here.
-import { CONFIG, MODULES } from './config';
+import { CONFIG, moduleInfo } from './config';
 import { hexDistance } from './hex';
-import type { GameState, ModuleId, SectorNode, ShipType } from './types';
+import type { GameState, ModuleId, SectorNode, Ship, ShipType } from './types';
 
 export interface Cost {
   credits: number;
@@ -23,8 +23,11 @@ export function pay(s: GameState, c: Cost): void {
   s.hydrogen -= c.hydrogen ?? 0;
 }
 
-export const bonus = (s: GameState, id: ModuleId) =>
-  1 + s.modules[id] * (MODULES.find((m) => m.id === id)?.perLevel ?? 0);
+/** Blueprint level of a module if this ship has it installed, else 0. */
+export function fitted(s: GameState, ship: Ship | undefined, id: ModuleId): number {
+  if (!ship) return 0;
+  return ship.fit[moduleInfo(id).slot] === id ? s.blueprints[id] : 0;
+}
 
 // ---- Planets ----------------------------------------------------------------
 
@@ -93,10 +96,10 @@ export const jumpFuel = (tier: number, ships: number) => CONFIG.hydrogen.jumpPer
 
 // ---- Trade ------------------------------------------------------------------
 
-export function tradeValuePerUnit(s: GameState, from: SectorNode, to: SectorNode): number {
+export function tradeValuePerUnit(s: GameState, from: SectorNode, to: SectorNode, ship?: Ship): number {
   const st = CONFIG.station;
   const d = hexDistance(from.hex, to.hex);
-  return (st.valueBase + st.valuePerHex * d) * bonus(s, 'tradeLink');
+  return (st.valueBase + st.valuePerHex * d) * (1 + fitted(s, ship, 'broker') * moduleInfo('broker').perLevel);
 }
 
 // ---- Hangar & ships ---------------------------------------------------------
@@ -119,24 +122,39 @@ export interface ShipStats {
   speedExp: number;
   hull: number;
   shield: number;
-  dps: number;
+  shieldRegen: number; // fraction of max shield per second
+  shieldDelay: number; // seconds without hits before the shield recharges
+  dps: number; // damage per second against each target
+  targets: number; // how many enemies it can hit at once
+  repair: number; // hull per second healed on ships nearby (repair drone)
   cargoHome: number;
   cargoExp: number;
   mineHome: number;
   mineExp: number;
 }
 
-export function shipStats(s: GameState, type: ShipType): ShipStats {
+/** Stats of a ship type, including the modules installed on `ship` when given. */
+export function shipStats(s: GameState, type: ShipType, ship?: Ship): ShipStats {
   const c = CONFIG.ships[type];
-  const speed = c.speed * bonus(s, 'engines');
-  const cargo = bonus(s, 'cargoBay');
-  const drill = bonus(s, 'drillHead');
+  const L = (id: ModuleId) => fitted(s, ship, id);
+  const per = (id: ModuleId) => moduleInfo(id).perLevel;
+  const speed = c.speed * (1 + L('thrusters') * per('thrusters'));
+  const cargo = (1 + L('cargo') * per('cargo')) * (1 + L('bunker') * per('bunker'));
+  const drill = 1 + L('drill') * per('drill');
+  const scatter = L('scatter');
+  let dps = c.dps * (1 + L('lance') * per('lance'));
+  if (scatter > 0) dps = c.dps * (0.5 + scatter * per('scatter'));
+  const regen = L('regen');
   return {
     speedHome: CONFIG.speed.home * speed,
     speedExp: CONFIG.speed.expedition * speed,
-    hull: c.hull * bonus(s, 'armor'),
-    shield: c.shield * bonus(s, 'shields'),
-    dps: c.dps * bonus(s, 'cannons'),
+    hull: c.hull * (1 + L('plating') * per('plating')),
+    shield: c.shield * (1 + L('deflector') * per('deflector')),
+    shieldRegen: CONFIG.shieldRegenFraction * (1 + regen * per('regen')),
+    shieldDelay: regen > 0 ? 1.5 : CONFIG.shieldRegenDelay,
+    dps,
+    targets: scatter > 0 ? 3 : 1,
+    repair: L('drone') * per('drone'),
     cargoHome: Math.floor(c.cargoHome * cargo),
     cargoExp: Math.floor(c.cargoExp * cargo),
     mineHome: c.mineHome * drill,
@@ -144,11 +162,18 @@ export function shipStats(s: GameState, type: ShipType): ShipStats {
   };
 }
 
+/** Seconds between uses of an active module at its current blueprint level. */
+export function moduleCooldown(s: GameState, id: ModuleId): number {
+  const m = moduleInfo(id);
+  if (!m.cooldown) return 0;
+  return id === 'blink' ? Math.max(30, m.cooldown - m.perLevel * (s.blueprints[id] - 1)) : m.cooldown;
+}
+
 // ---- Research ---------------------------------------------------------------
 
 export function researchCost(s: GameState, id: ModuleId): Cost & { time: number } {
   const r = CONFIG.research;
-  const l = s.modules[id]; // current level, cost is for l + 1
+  const l = s.blueprints[id]; // current level, cost is for l + 1
   return {
     credits: round(r.creditsBase * r.creditsGrowth ** l),
     ore: round(r.oreBase * r.oreGrowth ** l),

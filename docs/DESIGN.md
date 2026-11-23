@@ -11,19 +11,19 @@ Zum Balancen nur dort ändern und danach `npm run balance` laufen lassen.
 ```
  Kolonien ─┐
  Handel  ──┼─► Credits ──┐
- Abbau   ──┘   Erz ──────┼─► Ausbau · Schiffe · Sprungkerne · Forschung
+ Abbau   ──┘   Erz ──────┼─► Ausbau · Schiffe · Sprungkerne · Baupläne
                          │                         │
                          │            Sprungkern ──▼
                          │                  Expedition (15 min)
                          │                         │
                          └──── Echo-Splitter ◄─────┘
-                               (nur aus Expeditionen, gaten die Forschung ab Stufe 2)
+                               (nur aus Expeditionen, gaten die Baupläne ab Stufe 2)
 ```
 
 - **Credits** und **Erz** kommen aus dem Heimat-Sektor (passiv und mit Schiffen).
 - **Wasserstoff (H₂)** ist Treibstoff: Schiffe verbrauchen ihn im Heimat-Sektor beim Fliegen,
   und jede Expedition kostet Sprungtreibstoff. Er kommt aus Raffinerien an Gasriesen.
-- **Echo-Splitter** gibt es nur in Expeditionen. Sie sind der Engpass für Forschung, also für stärkere
+- **Echo-Splitter** gibt es nur in Expeditionen. Sie sind der Engpass für Baupläne, also für stärkere
   Schiffe, also für höhere Expeditionsstufen. Das verbindet beide Ebenen.
 
 ## Heimat-Sektor
@@ -89,21 +89,41 @@ Expedition pausiert, solange das Spiel zu ist (Designentscheidung: niemand verli
 
 Hangarplätze: `3 + Hangarstufe`. Ausbau `1200 × 2^Stufe` Cr und `200 × 2^Stufe` Erz.
 
-## Forschung (Module)
+## Module
 
-8 Module, je 5 Stufen. Stufe L → L+1 kostet `300 × 2^L` Credits, `60 × 2^L` Erz,
-Splitter `0` für Stufe 1, danach `6 × 1,9^(L−1)`, Dauer `30 × 1,7^L` s.
+Jedes Schiff hat Steckplätze, in die Module eingebaut werden (nur im Heimat-Sektor, jederzeit
+umbaubar, kostenlos). Module kommen aus **Bauplänen**: Ein Bauplan wird entschlüsselt und dann bis Stufe 5
+aufgewertet. Eingebaute Module werden mit jeder neuen Stufe automatisch stärker; ein Bauplan kann in
+beliebig viele Schiffe eingebaut werden.
 
-| Modul | Bonus pro Stufe |
+| Schiff | Plätze |
 |---|---|
-| Laderaum | +25 % Kapazität |
-| Handelsnetz | +12 % Warenwert |
-| Bohrkopf | +25 % Abbaurate |
-| Triebwerke | +10 % Tempo |
-| Panzerung | +20 % Rumpf |
-| Schildgitter | +25 % Schild |
-| Pulskanonen | +20 % Schaden |
-| Tiefenscanner | +10 % Splitter in Vorkommen |
+| Frachter | Handel, Schild |
+| Schürfer | Abbau, Schild |
+| Wächter | Waffe, Schild, Unterstützung |
+
+Bauplan Stufe L → L+1 kostet `300 × 2^L` Credits, `60 × 2^L` Erz, Splitter `0` für Stufe 1, danach
+`6 × 1,9^(L−1)`, Dauer `30 × 1,7^L` s.
+
+| Platz | Modul | Wirkung |
+|---|---|---|
+| Waffe | Phasenlanze | +35 % Schaden pro Stufe auf ein Ziel |
+| Waffe | Streukanone | bis zu 3 Ziele, je 50 % Schaden, +15 % pro Stufe |
+| Schild | Deflektor | +40 % Schild pro Stufe |
+| Schild | Regenerator | Schild lädt nach 1,5 s statt 4 s nach, +60 % Laderate pro Stufe |
+| Schild | Verbundpanzerung | +25 % Rumpf pro Stufe |
+| Unterstützung | Störimpuls (aktiv) | lähmt Gegner im Umkreis 6 für 3 s (+0,6 s pro Stufe), Abklingzeit 60 s |
+| Unterstützung | Notsprung (aktiv) | sofort zum Sprungtor, Abklingzeit 150 s (−15 s pro Stufe, min. 30 s) |
+| Unterstützung | Reparaturdrohne | repariert Schiffe im Umkreis 5 um 6 Rumpf/s pro Stufe |
+| Unterstützung | Schubdüsen | +15 % Tempo pro Stufe |
+| Handel | Frachtringe | +30 % Laderaum pro Stufe |
+| Handel | Handelsrechner | +15 % Credits pro Ware pro Stufe |
+| Abbau | Bohrlaser | +30 % Abbaurate (Erz und Splitter) pro Stufe |
+| Abbau | Erzbunker | +35 % Laderaum des Schürfers pro Stufe |
+
+Aktive Module werden in Expeditionen über einen Knopf im Schiffs- oder Expeditionspanel ausgelöst.
+Spielstände der Version 4 werden übernommen: alte Forschungsstufen werden zu Bauplänen, und die Schiffe
+bekommen passende Module eingebaut.
 
 ## Expeditionen
 
@@ -137,15 +157,14 @@ Ausbeute steigt aber mit jeder Minute.
 | T1 ohne Wächter | nach ca. 2 min verloren |
 | T1, 1 Wächter + Schürfer + Frachter | sicher, ca. 57 Splitter |
 | T2–T3, 1 Wächter | verloren nach ca. 10–12 min, früher gehen oder aufrüsten |
-| T3, 2 Wächter, Forschung 2 | sicher, ca. 88 Splitter |
-| T5, 2 Wächter, Forschung 3 | sicher bei Rückkehr nach 12,5 min, ca. 104 Splitter |
+| T3, 2 Wächter, Module Stufe 2 (Lanze, Deflektor, Bohrlaser, Frachtringe) | sicher, ca. 84 Splitter |
+| T5, 2 Wächter, Module Stufe 3 | meist sicher bei Rückkehr nach 12,5 min, ca. 96 Splitter |
 
 Der Heimat-Bot (mit aufgedeckter Karte) erreicht die erste Expedition nach etwa 7 Minuten Spielzeit.
 
 ## Nächste Ausbaustufen (Ideen)
 
 - Mehr Gegnertypen, Gegner mit Fähigkeiten, Boss am Ende höherer Stufen
-- Aktive Module (Schildblase, Teleport zum Tor, Tarnung) mit Abklingzeit
 - Mehrere Sektoren / Sektorkarte, die sich mit der Zeit erweitert
 - Koop-Expeditionen (Server nötig), Allianzen, gemeinsame Ziele
 - Handel mit Ladungsarten und schwankenden Preisen

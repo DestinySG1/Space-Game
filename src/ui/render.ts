@@ -1,7 +1,7 @@
 // Canvas drawing for the home sector and the expedition map: camera, free flight, effects.
 import { CONFIG } from '../game/config';
 import { shipStats } from '../game/economy';
-import { GATE_POS, depositNear, enemyTarget, expeditionShips, nearest } from '../game/expedition';
+import { GATE_POS, depositNear, enemyTarget, expeditionShips, inRange } from '../game/expedition';
 import { center, dist } from '../game/geom';
 import { hexKey, hexesInRadius } from '../game/hex';
 import { nodeById, nodeNear } from '../game/state';
@@ -223,7 +223,7 @@ function drawShip(ctx: CanvasRenderingContext2D, s: GameState, v: View, key: str
     ctx.setLineDash([]);
   }
   drawShipSprite(ctx, ship.type, p.x, p.y, ship.heading, r, moving ? 1 : 0, now);
-  const st = shipStats(s, ship.type);
+  const st = shipStats(s, ship.type, ship);
   if (selected || ship.hull < st.hull - 1 || ship.shield < st.shield - 1) {
     bar(ctx, p.x, p.y + r * 1.3, r * 2.6, ship.hull / st.hull, C.hull);
     if (st.shield > 0) bar(ctx, p.x, p.y + r * 1.3 + 4, r * 2.6, ship.shield / st.shield, C.shield);
@@ -355,7 +355,7 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
   for (const sh of ships) {
     if (sh.type !== 'miner' || sh.target) continue;
     const n = nodeNear(s, sh.pos);
-    if (n?.kind !== 'asteroid' || n.ore < 1 || sh.cargo >= shipStats(s, 'miner').cargoHome - 1e-6) continue;
+    if (n?.kind !== 'asteroid' || n.ore < 1 || sh.cargo >= shipStats(s, 'miner', sh).cargoHome - 1e-6) continue;
     const a = toScreen(v, sh.pos);
     const b = toScreen(v, center(n.hex));
     drawBeam(ctx, a.x, a.y, b.x, b.y, C.ore, Math.max(1, z * 0.08), now);
@@ -408,22 +408,22 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
   for (const sh of ships) {
     const sv = toScreen(v, sh.pos);
     if (sh.type === 'warden') {
-      const target = nearest(ex.enemies, sh.pos, CONFIG.ranges.weapon);
-      if (target) {
+      const st = shipStats(s, 'warden', sh);
+      for (const target of inRange(ex.enemies, sh.pos, CONFIG.ranges.weapon).slice(0, st.targets)) {
         const tv = toScreen(v, target.pos);
-        drawBeam(ctx, sv.x, sv.y, tv.x, tv.y, '#8fd0ff', Math.max(1.5, z * 0.1), now);
+        drawBeam(ctx, sv.x, sv.y, tv.x, tv.y, st.targets > 1 ? '#ffd27a' : '#8fd0ff', Math.max(1.5, z * (st.targets > 1 ? 0.06 : 0.1)), now);
       }
     }
     if (sh.type === 'miner' && !sh.target) {
       const dep = depositNear(ex, sh.pos);
-      if (dep && sh.shards < shipStats(s, 'miner').cargoExp - 1e-6) {
+      if (dep && sh.shards < shipStats(s, 'miner', sh).cargoExp - 1e-6) {
         const dp = toScreen(v, center(dep.hex));
         drawBeam(ctx, sv.x, sv.y, dp.x, dp.y, C.shard, Math.max(1, z * 0.08), now);
       }
     }
   }
   for (const en of ex.enemies) {
-    if (en.target) continue;
+    if (en.target || en.stunnedUntil > s.time) continue;
     const target = enemyTarget(en.pos, ships, ships.filter((x) => x.type === 'warden'));
     if (!target || dist(target.pos, en.pos) > CONFIG.ranges.enemyAttack) continue;
     const a = toScreen(v, en.pos);
@@ -431,7 +431,7 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
     drawBeam(ctx, a.x, a.y, b.x, b.y, C.enemy, Math.max(1, z * 0.07), now);
   }
 
-  for (const en of ex.enemies) drawEnemy(ctx, v, en, now);
+  for (const en of ex.enemies) drawEnemy(ctx, v, en, now, en.stunnedUntil > s.time);
 
   const selected = ships.find((x) => x.id === ui.selShip);
   for (const sh of ships) drawCourse(ctx, v, sh, sh === selected, now);
@@ -467,10 +467,17 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
   return { view: v, shipPos, mapRadiusPx };
 }
 
-function drawEnemy(ctx: CanvasRenderingContext2D, v: View, en: Enemy, now: number) {
+function drawEnemy(ctx: CanvasRenderingContext2D, v: View, en: Enemy, now: number, stunned: boolean) {
   const p = toScreen(v, en.pos);
   const r = Math.max(4, v.size * (en.type === 'colossus' ? S.colossus : S.skirmisher));
   drawTrail(ctx, v, trailFor(`e:${en.id}`, en.pos, !!en.target, now), en.pos, '#ff5d6c', Math.max(1, r * 0.3));
   drawEnemySprite(ctx, en.type, p.x, p.y, r, now, hashId(en.id) % 7);
+  if (stunned) {
+    ctx.strokeStyle = `rgba(120,220,255,${0.5 + 0.4 * Math.sin(now / 80)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r * 1.5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   bar(ctx, p.x, p.y + r + 4, r * 2.4, en.hp / en.maxHp, C.enemy);
 }

@@ -1,4 +1,4 @@
-import { CONFIG } from './config';
+import { CONFIG, MODULES } from './config';
 import { shipStats } from './economy';
 import { center, dist, parkingSpot } from './geom';
 import { hex, hexDistance, hexKey, hexesInRadius, pixelToHex } from './hex';
@@ -25,7 +25,7 @@ export function newGame(seed = Date.now() % 1_000_000): GameState {
     nodes: generateSector(seed),
     explored: hexesInRadius(CONFIG.sector.exploredRadius).map(hexKey),
     ships: [],
-    modules: { cargoBay: 0, tradeLink: 0, drillHead: 0, engines: 0, armor: 0, shields: 0, cannons: 0, scanner: 0 },
+    blueprints: emptyBlueprints(),
     hangar: 0,
     queue: { ship: null, research: null, beacon: null },
     beacons: {},
@@ -105,10 +105,16 @@ export function addShip(s: GameState, type: ShipType): Ship {
     cargoOrigin: null,
     shards: 0,
     shuttle: null,
+    fit: {},
+    cooldowns: {},
   };
   ship.pos = parkingSpot(center(baseNode(s).hex), ship.id, CONFIG.ranges.park);
   s.ships.push(ship);
   return ship;
+}
+
+export function emptyBlueprints(): GameState['blueprints'] {
+  return Object.fromEntries(MODULES.map((m) => [m.id, 0])) as GameState['blueprints'];
 }
 
 export const isExplored = (s: GameState, h: Hex) => s.explored.includes(hexKey(h));

@@ -1,6 +1,6 @@
 // Side panel: HTML built from state. Buttons carry data-action / data-arg, handled in main.ts.
-import { shuttleTargets } from '../game/actions';
-import { CONFIG, MODULES } from '../game/config';
+import { cooldownLeft, shuttleTargets } from '../game/actions';
+import { CONFIG, MODULES, SLOTS, SLOT_NAMES, moduleInfo } from '../game/config';
 import {
   beaconCost, canAfford, colonizeCost, hangarSlots, hangarUpgradeCost, jumpFuel, passiveIncome, planetOutput, planetUpgradeCost,
   refineryCost, refineryOutput, refineryUpgradeCost, researchCost, shipCost, shipStats, tradeValuePerUnit, unlockThreshold,
@@ -8,7 +8,7 @@ import {
 } from '../game/economy';
 import { canJump, expeditionShips } from '../game/expedition';
 import { nodeById, nodeNear, shipById } from '../game/state';
-import type { GameState, Job, Ship, ShipType } from '../game/types';
+import type { GameState, Job, ModuleId, Ship, ShipType, SlotType } from '../game/types';
 import { esc, fmt, fmt1, fmtTime } from './format';
 import type { UIState } from './ui-state';
 
@@ -51,7 +51,7 @@ export function topbar(s: GameState, ui: UIState): string {
 
 export function tabs(ui: UIState): string {
   const t: [UIState['tab'], string][] = [
-    ['select', 'Auswahl'], ['yard', 'Werft'], ['research', 'Forschung'], ['expedition', 'Expedition'], ['log', 'Logbuch'],
+    ['select', 'Auswahl'], ['yard', 'Werft'], ['research', 'Module'], ['expedition', 'Expedition'], ['log', 'Logbuch'],
   ];
   return t.map(([id, name]) => `<button class="tab ${ui.tab === id ? 'on' : ''}" data-action="tab" data-arg="${id}">${name}</button>`).join('');
 }
@@ -147,12 +147,12 @@ function nodePanel(s: GameState, id: string): string {
 }
 
 function shipPanel(s: GameState, ship: Ship): string {
-  const st = shipStats(s, ship.type);
+  const st = shipStats(s, ship.type, ship);
   const head = `<h2>${CONFIG.ships[ship.type].name} „${esc(ship.name)}“</h2>
     <p class="muted small">${SHIP_ROLE[ship.type]}</p>
     <div class="card stats">
       <div>Rumpf <b>${fmt(ship.hull)}</b>/${fmt(st.hull)}</div><div>Schild <b>${fmt(ship.shield)}</b>/${fmt(st.shield)}</div>
-      ${st.dps ? `<div>Schaden <b>${fmt1(st.dps)}</b>/s</div>` : ''}
+      ${st.dps ? `<div>Schaden <b>${fmt1(st.dps)}</b>/s${st.targets > 1 ? ` ×${st.targets}` : ''}</div>` : ''}
       <div>Verbrauch <b>${fmt1(CONFIG.hydrogen.burn[ship.type] * 10)}</b> H₂/10 E.</div>
       ${ship.location === 'home' ? `<div>Ladung <b>${fmt(ship.cargo)}</b>/${fmt(st.cargoHome)}</div>` : `<div>Splitter <b>${fmt(ship.shards)}</b>/${fmt(st.cargoExp)}</div>`}
     </div>`;
@@ -161,7 +161,8 @@ function shipPanel(s: GameState, ship: Ship): string {
     : '';
   if (ship.location === 'expedition') {
     return `${head}${status}<p class="muted small">Tippe irgendwo auf die Karte, um dorthin zu fliegen. Am Sprungtor kann das Schiff heimspringen.</p>
-      ${btn('jump', 'Heimsprung', { arg: ship.id, disabled: !canJump(ship), kind: 'primary' })}
+      <div class="row">${btn('jump', 'Heimsprung', { arg: ship.id, disabled: !canJump(ship), kind: 'primary' })} ${abilityButton(s, ship)}</div>
+      ${fitting(s, ship)}
       ${btn('deselect', 'Abwählen', { kind: 'ghost' })}`;
   }
   let route = '';
@@ -179,7 +180,7 @@ function shipPanel(s: GameState, ship: Ship): string {
       route = `<p class="muted small">${ship.type === 'hauler' ? 'Fliege zu einem Handelsposten, um eine Pendelroute einzurichten.' : 'Fliege zu einem Gürtel oder zur Basis, um eine Pendelroute einzurichten.'}</p>`;
     }
   }
-  return `${head}${status}${route}${btn('deselect', 'Abwählen', { kind: 'ghost' })}`;
+  return `${head}${status}${route}${fitting(s, ship)}${btn('deselect', 'Abwählen', { kind: 'ghost' })}`;
 }
 
 function expeditionHelp(s: GameState): string {
@@ -191,6 +192,7 @@ function expeditionHelp(s: GameState): string {
     Wächter in der Nähe ziehen das Feuer der Gegner auf sich. Zurück zum <b>Sprungtor</b> und heimspringen, bevor die Zeit abläuft.</p>
     <div class="card">Restzeit <b>${fmtTime(ex.duration - ex.elapsed)}</b> · Welle ${ex.waveIndex} · Gegner ${ex.enemies.length}</div>
     ${ships.map((x) => btn('selectShip', `${CONFIG.ships[x.type].name} ${esc(x.name)} ◆${Math.floor(x.shards)}`, { arg: x.id, kind: 'ghost' })).join(' ')}
+    <div class="row">${ships.map((x) => abilityButton(s, x)).join(' ')}</div>
     <div class="row">${btn('recall', 'Alle zum Tor')} ${btn('jumpAll', 'Alle am Tor: Heimsprung', { kind: 'primary' })}</div>`;
 }
 
@@ -225,19 +227,50 @@ function yardPanel(s: GameState): string {
 
 function researchPanel(s: GameState): string {
   const q = s.queue.research;
-  return `<h2>Forschung</h2>
-    <p class="muted small">Ab Stufe 2 braucht jede Forschung <span class="res sh">Echo-Splitter</span> aus Expeditionen.</p>
-    ${q ? `<div class="card">Läuft: <b>${MODULES.find((m) => m.id === q.target)!.name}</b>${progress(q)}</div>` : ''}
-    ${MODULES.map((m) => {
-      const l = s.modules[m.id];
+  const slots: SlotType[] = ['weapon', 'shield', 'support', 'trade', 'mining'];
+  return `<h2>Module</h2>
+    <p class="muted small">Entschlüssle Baupläne und baue die Module unter <b>Auswahl</b> in einzelne Schiffe ein.
+    Ab Stufe 2 braucht jeder Bauplan <span class="res sh">Echo-Splitter</span> aus Expeditionen. Eingebaute Module werden
+    mit jeder neuen Stufe automatisch stärker.</p>
+    ${q ? `<div class="card">Entschlüsselt: <b>${moduleInfo(q.target as ModuleId).name}</b>${progress(q)}</div>` : ''}
+    ${slots.map((slot) => `<h3>${SLOT_NAMES[slot]} <span class="muted small">· ${slotUsers(slot)}</span></h3>` + MODULES.filter((m) => m.slot === slot).map((m) => {
+      const l = s.blueprints[m.id];
       const maxed = l >= CONFIG.research.maxLevel;
       const c = researchCost(s, m.id);
+      const users = s.ships.filter((x) => x.fit[m.slot] === m.id).length;
       return `<div class="card">
-        <div class="ct"><b>${m.name}</b><span class="lvl">${l}/${CONFIG.research.maxLevel}</span></div>
-        <div class="muted small">${m.desc}: +${Math.round(m.perLevel * 100)} % pro Stufe (jetzt +${Math.round(l * m.perLevel * 100)} %)</div>
-        ${maxed ? '' : btn('research', `Erforschen · ${cost(c)} · ${fmtTime(c.time)}`, { arg: m.id, disabled: !!q || !canAfford(s, c) })}
+        <div class="ct"><b>${m.name}${m.cooldown ? ' <span class="tag">aktiv</span>' : ''}</b><span class="lvl">${l}/${CONFIG.research.maxLevel}</span></div>
+        <div class="muted small">${m.desc}${users ? ` · eingebaut in ${users} Schiff(en)` : ''}</div>
+        ${maxed ? '' : btn('research', `${l === 0 ? 'Entschlüsseln' : 'Aufwerten'} · ${cost(c)} · ${fmtTime(c.time)}`, { arg: m.id, disabled: !!q || !canAfford(s, c) })}
       </div>`;
-    }).join('')}`;
+    }).join('')).join('')}`;
+}
+
+const slotUsers = (slot: SlotType) =>
+  (Object.keys(SLOTS) as ShipType[]).filter((t) => SLOTS[t].includes(slot)).map((t) => CONFIG.ships[t].name).join(', ');
+
+/** Slot list for a ship: what is installed and what could be. */
+function fitting(s: GameState, ship: Ship): string {
+  const home = ship.location === 'home';
+  return `<div class="card"><div class="muted small">Module${home ? '' : ' (wechseln nur im Heimat-Sektor)'}</div>
+    ${SLOTS[ship.type].map((slot) => {
+      const cur = ship.fit[slot];
+      const options = MODULES.filter((m) => m.slot === slot && s.blueprints[m.id] > 0 && m.id !== cur);
+      return `<div class="slot"><span class="muted small">${SLOT_NAMES[slot]}</span>
+        <b>${cur ? `${moduleInfo(cur).name} ${s.blueprints[cur]}` : '<span class="muted">leer</span>'}</b>
+        ${home ? `<div class="row">${options.map((m) => btn('equip', `${m.name} ${s.blueprints[m.id]}`, { arg: `${ship.id}|${slot}|${m.id}`, kind: 'ghost' })).join('')}
+          ${cur ? btn('equip', 'Ausbauen', { arg: `${ship.id}|${slot}|`, kind: 'ghost' }) : ''}
+          ${!cur && !options.length ? '<span class="muted small">Noch kein Bauplan – siehe Tab Module.</span>' : ''}</div>` : ''}
+      </div>`;
+    }).join('')}</div>`;
+}
+
+/** Button for the ship's active module during an expedition. */
+function abilityButton(s: GameState, ship: Ship): string {
+  const id = ship.fit.support;
+  if (!id || !moduleInfo(id).cooldown) return '';
+  const left = cooldownLeft(s, ship, id);
+  return btn('activate', left > 0 ? `${moduleInfo(id).name} · ${Math.ceil(left)} s` : `${moduleInfo(id).name} auslösen`, { arg: ship.id, disabled: left > 0, kind: 'primary' });
 }
 
 // ---- Expedition --------------------------------------------------------------

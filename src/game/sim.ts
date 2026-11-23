@@ -1,8 +1,8 @@
 import { CONFIG } from './config';
 import { tickExpedition } from './expedition';
 import { tickHome } from './home';
-import { newGame } from './state';
-import type { GameState } from './types';
+import { emptyBlueprints, newGame } from './state';
+import type { GameState, ModuleId } from './types';
 
 /** Advance the whole game by dt seconds in fixed steps. */
 export function step(s: GameState, dt: number): void {
@@ -36,8 +36,8 @@ export function load(storage: Pick<Storage, 'getItem'> | null): { state: GameSta
   try {
     const raw = storage?.getItem(CONFIG.saveKey);
     if (raw) {
-      const s = JSON.parse(raw) as GameState;
-      if (s.version === CONFIG.saveVersion) {
+      const s = migrate(JSON.parse(raw));
+      if (s && s.version === CONFIG.saveVersion) {
         const offline = simulateOffline(s, (Date.now() - s.savedAt) / 1000);
         return { state: s, offline };
       }
@@ -46,6 +46,41 @@ export function load(storage: Pick<Storage, 'getItem'> | null): { state: GameSta
     // corrupt or blocked storage: start fresh
   }
   return { state: newGame(), offline: 0 };
+}
+
+/** Old research levels (save version 4) become module blueprints; ships get matching modules. */
+const OLD_TO_NEW: Record<string, ModuleId> = {
+  cargoBay: 'cargo', tradeLink: 'broker', drillHead: 'drill', engines: 'thrusters',
+  armor: 'plating', shields: 'deflector', cannons: 'lance',
+};
+
+export function migrate(raw: any): GameState | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.version === 4) {
+    const bp = emptyBlueprints();
+    for (const [oldId, lvl] of Object.entries(raw.modules ?? {})) if (OLD_TO_NEW[oldId]) bp[OLD_TO_NEW[oldId]] = Number(lvl) || 0;
+    raw.blueprints = bp;
+    delete raw.modules;
+    const has = (id: ModuleId) => bp[id] > 0;
+    for (const ship of raw.ships ?? []) {
+      ship.cooldowns = {};
+      ship.fit = {};
+      if (has('deflector')) ship.fit.shield = 'deflector';
+      else if (has('plating')) ship.fit.shield = 'plating';
+      if (ship.type === 'hauler' && (has('broker') || has('cargo'))) ship.fit.trade = has('broker') ? 'broker' : 'cargo';
+      if (ship.type === 'miner' && has('drill')) ship.fit.mining = 'drill';
+      if (ship.type === 'warden' && has('lance')) ship.fit.weapon = 'lance';
+      if (ship.type === 'warden' && has('thrusters')) ship.fit.support = 'thrusters';
+    }
+    for (const en of raw.expedition?.enemies ?? []) en.stunnedUntil = 0;
+    const q = raw.queue?.research;
+    if (q) {
+      if (OLD_TO_NEW[q.target]) q.target = OLD_TO_NEW[q.target];
+      else raw.queue.research = null;
+    }
+    raw.version = 5;
+  }
+  return raw as GameState;
 }
 
 export function save(s: GameState, storage: Pick<Storage, 'setItem'> | null): void {

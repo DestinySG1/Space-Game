@@ -5,7 +5,7 @@ import { colonizeCost, jumpFuel, passiveIncome, refineryCost, researchCost, ship
 import { GATE_POS, canJump, expeditionShips } from '../src/game/expedition';
 import { center, dist } from '../src/game/geom';
 import { hex, hexDistance, hexLine, hexesInRadius, pixelToHex, hexToPixel } from '../src/game/hex';
-import { load, save, simulateOffline, step } from '../src/game/sim';
+import { load, migrate, save, simulateOffline, step } from '../src/game/sim';
 import { addShip, isExplored, newGame } from '../src/game/state';
 
 const stations = (s: ReturnType<typeof newGame>) => s.nodes.filter((n) => n.kind === 'station');
@@ -71,19 +71,6 @@ describe('home economy', () => {
     expect(s.ore).toBeGreaterThan(before + 60);
   });
 
-  it('research costs shards from level 2 and applies its bonus', () => {
-    const s = newGame(4);
-    s.credits = 1e6;
-    expect(researchCost(s, 'drillHead').shards).toBe(0);
-    const base = shipStats(s, 'miner').mineHome;
-    expect(A.research(s, 'drillHead').ok).toBe(true);
-    step(s, researchCost(s, 'drillHead').time + 60);
-    expect(s.modules.drillHead).toBe(1);
-    expect(shipStats(s, 'miner').mineHome).toBeCloseTo(base * 1.25);
-    expect(researchCost(s, 'drillHead').shards).toBeGreaterThan(0);
-    expect(A.research(s, 'drillHead').ok).toBe(false); // no shards yet
-  });
-
   it('respects hangar slots', () => {
     const s = newGame(5);
     s.credits = 1e6;
@@ -92,6 +79,89 @@ describe('home economy', () => {
     expect(A.buildShip(s, 'hauler').ok).toBe(false);
     expect(A.upgradeHangar(s).ok).toBe(true);
     expect(A.buildShip(s, 'hauler').ok).toBe(true);
+  });
+});
+
+describe('modules', () => {
+  it('blueprints cost shards from level 2 and only fitted ships get the bonus', () => {
+    const s = newGame(50);
+    s.credits = 1e6;
+    s.ore = 1e6;
+    expect(researchCost(s, 'drill').shards).toBe(0);
+    expect(A.research(s, 'drill').ok).toBe(true);
+    step(s, researchCost(s, 'drill').time + 60);
+    expect(s.blueprints.drill).toBe(1);
+    const miner = s.ships.find((x) => x.type === 'miner')!;
+    const base = shipStats(s, 'miner', miner).mineHome;
+    expect(A.equip(s, miner.id, 'mining', 'drill').ok).toBe(true);
+    expect(shipStats(s, 'miner', miner).mineHome).toBeCloseTo(base * 1.3);
+    expect(shipStats(s, 'miner').mineHome).toBeCloseTo(base); // the type without a ship is unmodified
+    expect(researchCost(s, 'drill').shards).toBeGreaterThan(0);
+    expect(A.research(s, 'drill').ok).toBe(false); // no shards yet
+  });
+
+  it('checks slot, blueprint and location when equipping', () => {
+    const s = newGame(51);
+    const hauler = s.ships.find((x) => x.type === 'hauler')!;
+    expect(A.equip(s, hauler.id, 'trade', 'broker').ok).toBe(false); // not researched
+    s.blueprints.broker = 1;
+    s.blueprints.lance = 1;
+    expect(A.equip(s, hauler.id, 'weapon', 'lance').ok).toBe(false); // haulers have no weapon slot
+    expect(A.equip(s, hauler.id, 'trade', 'drill').ok).toBe(false); // wrong slot
+    expect(A.equip(s, hauler.id, 'trade', 'broker').ok).toBe(true);
+    expect(A.equip(s, hauler.id, 'trade', null).ok).toBe(true);
+    expect(hauler.fit.trade).toBeUndefined();
+  });
+
+  it('the scatter cannon hits three enemies, the lance one', () => {
+    const s = newGame(52);
+    s.beacons[1] = 1;
+    s.blueprints.scatter = 1;
+    const w = addShip(s, 'warden');
+    A.equip(s, w.id, 'weapon', 'scatter');
+    A.launchExpedition(s, 1, [w.id], 53);
+    const ex = s.expedition!;
+    for (let i = 0; i < 4; i++) {
+      ex.enemies.push({ id: `t${i}`, type: 'skirmisher', pos: { x: w.pos.x + 1 + i * 0.2, y: w.pos.y }, target: null, heading: 0, hp: 1000, maxHp: 1000, dps: 0, stunnedUntil: 0 });
+    }
+    step(s, 1);
+    expect(ex.enemies.filter((e) => e.hp < 1000)).toHaveLength(3);
+  });
+
+  it('the disruption pulse freezes enemies and the emergency jump reaches the gate', () => {
+    const s = newGame(54);
+    s.beacons[1] = 1;
+    s.blueprints.pulse = 1;
+    s.blueprints.blink = 1;
+    const w = addShip(s, 'warden');
+    A.equip(s, w.id, 'support', 'pulse');
+    A.launchExpedition(s, 1, [w.id], 55);
+    const ex = s.expedition!;
+    ex.enemies.push({ id: 'x', type: 'skirmisher', pos: { x: w.pos.x + 5, y: w.pos.y }, target: null, heading: 0, hp: 1e6, maxHp: 1e6, dps: 50, stunnedUntil: 0 });
+    expect(A.activate(s, w.id).ok).toBe(true);
+    const hull = w.hull;
+    const shield = w.shield;
+    step(s, 2);
+    expect(w.hull + w.shield).toBeCloseTo(hull + shield, 0); // nothing hit it while stunned
+    expect(A.activate(s, w.id).ok).toBe(false); // cooling down
+    w.fit.support = 'blink';
+    w.pos = { x: 30, y: 0 };
+    expect(A.activate(s, w.id).ok).toBe(true);
+    expect(canJump(w)).toBe(true);
+  });
+
+  it('turns old research levels into blueprints and fitted modules', () => {
+    const s = newGame(56) as unknown as Record<string, unknown>;
+    s.version = 4;
+    s.modules = { cargoBay: 1, tradeLink: 2, drillHead: 3, engines: 0, armor: 0, shields: 1, cannons: 2, scanner: 4 };
+    delete s.blueprints;
+    const m = migrate(JSON.parse(JSON.stringify(s)))!;
+    expect(m.version).toBe(CONFIG.saveVersion);
+    expect(m.blueprints.broker).toBe(2);
+    expect(m.blueprints.drill).toBe(3);
+    expect(m.blueprints.lance).toBe(2);
+    const hauler = m.ships.find((x) => x.type === 'hauler')!;
+    expect(hauler.fit).toEqual({ shield: 'deflector', trade: 'broker' });
   });
 });
 

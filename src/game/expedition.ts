@@ -1,6 +1,6 @@
 // Expeditions: a timed run into an anomaly. Mine shards, survive waves, jump home before it collapses.
 import { CONFIG } from './config';
-import { bonus, shipStats, unlockThreshold } from './economy';
+import { shipStats, unlockThreshold } from './economy';
 import { center, dist, fly, parkingSpot } from './geom';
 import { hex, hexDistance, hexesInRadius } from './hex';
 import { basePos, sendTo } from './home';
@@ -11,19 +11,18 @@ import type { Deposit, EnemyType, Expedition, GameState, Ship, Vec } from './typ
 export const GATE = hex(0, 0);
 export const GATE_POS: Vec = { x: 0, y: 0 };
 
-export function createExpedition(s: GameState, tier: number, shipIds: string[], seed: number): Expedition {
+export function createExpedition(_s: GameState, tier: number, shipIds: string[], seed: number): Expedition {
   const e = CONFIG.expedition;
   const rng = makeRng(seed);
   const spots = rng.shuffle(hexesInRadius(e.radius).filter((h) => hexDistance(h, GATE) >= 2));
   const count = e.depositsBase + tier;
-  const scan = bonus(s, 'scanner');
   const deposits: Deposit[] = [];
   for (const h of spots) {
     if (deposits.length >= count) break;
     if (deposits.some((d) => hexDistance(d.hex, h) < 2)) continue; // keep deposits apart
     deposits.push({
       hex: h,
-      shards: Math.round(rng.int(e.depositShardsMin, e.depositShardsMax) * tier ** e.depositTierExponent * scan),
+      shards: Math.round(rng.int(e.depositShardsMin, e.depositShardsMax) * tier ** e.depositTierExponent),
     });
   }
   return {
@@ -77,6 +76,7 @@ function spawnWave(s: GameState, ex: Expedition): void {
       hp,
       maxHp: hp,
       dps: def.dps * mult,
+      stunnedUntil: 0,
     });
   }
   log(s, `Expedition: Welle ${ex.waveIndex} – ${count} Gegner tauchen am Rand auf.`);
@@ -102,6 +102,15 @@ export function nearest<T extends { pos: Vec }>(list: T[], from: Vec, range: num
   return best;
 }
 
+/** Enemies within range, nearest first. */
+export function inRange<T extends { pos: Vec }>(list: T[], from: Vec, range: number): T[] {
+  return list
+    .map((x) => ({ x, d: dist(x.pos, from) }))
+    .filter((e) => e.d <= range)
+    .sort((a, b) => a.d - b.d)
+    .map((e) => e.x);
+}
+
 export function tickExpedition(s: GameState, dt: number): void {
   const ex = s.expedition;
   if (!ex) return;
@@ -117,10 +126,16 @@ export function tickExpedition(s: GameState, dt: number): void {
 
   // player ships: fly, regenerate shields, mine, fight
   for (const ship of ships) {
-    const st = shipStats(s, ship.type);
+    const st = shipStats(s, ship.type, ship);
     const flying = fly(ship, st.speedExp, dt);
-    if (s.time - ship.lastHit > CONFIG.shieldRegenDelay) {
-      ship.shield = Math.min(st.shield, ship.shield + st.shield * CONFIG.shieldRegenFraction * dt);
+    if (s.time - ship.lastHit > st.shieldDelay) {
+      ship.shield = Math.min(st.shield, ship.shield + st.shield * st.shieldRegen * dt);
+    }
+    if (st.repair > 0) {
+      for (const other of ships) {
+        if (dist(other.pos, ship.pos) > CONFIG.expedition.droneRadius) continue;
+        other.hull = Math.min(shipStats(s, other.type, other).hull, other.hull + st.repair * dt);
+      }
     }
     if (!flying && st.mineExp > 0) {
       const dep = depositNear(ex, ship.pos);
@@ -132,15 +147,14 @@ export function tickExpedition(s: GameState, dt: number): void {
       }
     }
     if (st.dps > 0) {
-      const target = nearest(ex.enemies, ship.pos, R.weapon);
-      if (target) target.hp -= st.dps * dt;
+      for (const target of inRange(ex.enemies, ship.pos, R.weapon).slice(0, st.targets)) target.hp -= st.dps * dt;
     }
   }
 
   // miners hand their shards to a hauler standing next to them
   for (const miner of ships.filter((x) => x.type === 'miner' && x.shards > 0)) {
     for (const hauler of ships.filter((x) => x.type === 'hauler' && !x.target && dist(x.pos, miner.pos) <= R.transfer)) {
-      const moved = Math.min(shipStats(s, 'hauler').cargoExp - hauler.shards, miner.shards);
+      const moved = Math.min(shipStats(s, 'hauler', hauler).cargoExp - hauler.shards, miner.shards);
       hauler.shards += moved;
       miner.shards -= moved;
     }
@@ -152,6 +166,7 @@ export function tickExpedition(s: GameState, dt: number): void {
   if (ex.enemies.length < before) s.kills += before - ex.enemies.length;
   const wardens = ships.filter((x) => x.type === 'warden');
   for (const en of ex.enemies) {
+    if (en.stunnedUntil > s.time) continue; // paralysed by a disruption pulse
     const target = enemyTarget(en.pos, ships, wardens);
     if (!target) break;
     const d = dist(en.pos, target.pos);

@@ -1,5 +1,5 @@
 // Home sector simulation: colonies, trade, mining, free ship flight and build queues.
-import { CONFIG, MODULES } from './config';
+import { CONFIG, moduleInfo } from './config';
 import { passiveIncome, shipStats, tradeValuePerUnit } from './economy';
 import { center, dist, fly, parkingSpot } from './geom';
 import { addShip, baseNode, exploreAt, log, nodeById, nodeNear } from './state';
@@ -31,7 +31,7 @@ export function tickHome(s: GameState, dt: number): void {
 }
 
 function tickHomeShip(s: GameState, ship: Ship, dt: number): void {
-  const st = shipStats(s, ship.type);
+  const st = shipStats(s, ship.type, ship);
   // ships at home repair fully over ~20 s
   ship.hull = Math.min(st.hull, ship.hull + st.hull * 0.05 * dt);
   ship.shield = Math.min(st.shield, ship.shield + st.shield * 0.1 * dt);
@@ -53,7 +53,7 @@ function tickHomeShip(s: GameState, ship: Ship, dt: number): void {
     // sell goods that came from another station
     if (ship.cargo > 0 && ship.cargoOrigin && ship.cargoOrigin !== here.id) {
       const origin = nodeById(s, ship.cargoOrigin)!;
-      s.credits += ship.cargo * tradeValuePerUnit(s, origin, here);
+      s.credits += ship.cargo * tradeValuePerUnit(s, origin, here, ship);
       ship.cargo = 0;
       ship.cargoOrigin = null;
     }
@@ -101,9 +101,8 @@ function tickQueues(s: GameState, dt: number): void {
   }
   if (q.research && (q.research.remaining -= dt) <= 0) {
     const id = q.research.target as ModuleId;
-    s.modules[id] += 1;
-    const info = MODULES.find((m) => m.id === id)!;
-    log(s, `Forschung: ${info.name} Stufe ${s.modules[id]} abgeschlossen.`);
+    s.blueprints[id] += 1;
+    log(s, `Bauplan: ${moduleInfo(id).name} Stufe ${s.blueprints[id]} entschlüsselt.`);
     refreshStats(s);
     q.research = null;
   }
@@ -118,7 +117,7 @@ function tickQueues(s: GameState, dt: number): void {
 /** After an upgrade, keep current hull/shield but never above the new maximums. */
 export function refreshStats(s: GameState): void {
   for (const ship of s.ships) {
-    const st = shipStats(s, ship.type);
+    const st = shipStats(s, ship.type, ship);
     ship.hull = Math.min(st.hull, ship.hull);
     ship.shield = Math.min(st.shield, ship.shield);
   }

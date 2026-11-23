@@ -10,15 +10,21 @@ export interface Vec {
 }
 
 export type ShipType = 'hauler' | 'miner' | 'warden';
+export type SlotType = 'weapon' | 'shield' | 'support' | 'trade' | 'mining';
 export type ModuleId =
-  | 'cargoBay'
-  | 'tradeLink'
-  | 'drillHead'
-  | 'engines'
-  | 'armor'
-  | 'shields'
-  | 'cannons'
-  | 'scanner';
+  | 'lance'
+  | 'scatter'
+  | 'deflector'
+  | 'regen'
+  | 'plating'
+  | 'pulse'
+  | 'blink'
+  | 'drone'
+  | 'thrusters'
+  | 'cargo'
+  | 'broker'
+  | 'drill'
+  | 'bunker';
 
 export type NodeKind = 'base' | 'planet' | 'station' | 'asteroid' | 'gasgiant';
 
@@ -48,6 +54,8 @@ export interface Ship {
   cargoOrigin: string | null; // station the trade goods were loaded at
   shards: number; // expedition loot carried
   shuttle: { a: string; b: string } | null; // node ids to travel between automatically
+  fit: Partial<Record<SlotType, ModuleId>>; // installed module per slot
+  cooldowns: Partial<Record<ModuleId, number>>; // game time when an active module is ready again
 }
 
 export interface Job {
@@ -68,6 +76,7 @@ export interface Enemy {
   hp: number;
   maxHp: number;
   dps: number;
+  stunnedUntil: number;
 }
 
 export interface Deposit {
@@ -111,7 +120,7 @@ export interface GameState {
   nodes: SectorNode[];
   explored: string[]; // hex keys "q,r" of the home sector that are no longer hidden in the nebula
   ships: Ship[];
-  modules: Record<ModuleId, number>;
+  blueprints: Record<ModuleId, number>; // researched level per module, 0 = locked
   hangar: number;
   queue: { ship: Job | null; research: Job | null; beacon: Job | null };
   beacons: Record<number, number>; // tier -> count
