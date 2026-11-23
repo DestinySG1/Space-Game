@@ -5,22 +5,22 @@ import type { ModuleId, ShipType } from './types';
 
 export const CONFIG = {
   saveKey: 'lumen-reach-save-v1',
-  saveVersion: 1,
+  saveVersion: 2,
   tick: 0.1, // fixed simulation step in seconds
   offlineCapSeconds: 8 * 3600,
 
   start: { credits: 600, ore: 60, shards: 0 },
 
   sector: {
-    radius: 4,
-    planets: 6,
-    stations: 3,
-    asteroids: 4,
+    radius: 8, // 4x the area of the first prototype
+    planets: 18,
+    stations: 6,
+    asteroids: 10,
   },
 
   planet: {
     colonizeBase: 250,
-    colonizeGrowth: 1.7, // cost multiplier per planet already colonized
+    colonizeGrowth: 1.45, // cost multiplier per planet already colonized
     upgradeCredits: 180,
     upgradeOre: 30,
     upgradeGrowth: 1.75,
@@ -59,7 +59,17 @@ export const CONFIG = {
     },
   } satisfies Record<ShipType, ShipConfig>,
 
-  speed: { home: 0.15, expedition: 0.4 }, // hexes per second, multiplied by ship speed
+  // world units per second (neighbouring hexes are √3 ≈ 1.73 apart), multiplied by ship speed
+  speed: { home: 0.45, expedition: 0.7 },
+  ranges: {
+    dock: 0.8, // a ship this close to a planet, station, belt or deposit counts as "there"
+    park: 0.45, // ships park on a small ring around a node so they don't overlap
+    gate: 0.9, // may jump home this close to the gate
+    weapon: 2.0, // warden fire range
+    enemyAttack: 1.5, // enemies stop and fire at this distance
+    transfer: 1.0, // miner hands shards to a hauler this close
+    taunt: 2.5, // enemies switch to a warden that is at most this much farther away than their nearest ship
+  },
   shieldRegenDelay: 4,
   shieldRegenFraction: 0.05, // of max shield per second
 
@@ -81,9 +91,9 @@ export const CONFIG = {
 
   expedition: {
     duration: 15 * 60,
-    radius: 4,
+    radius: 8,
     maxShips: 4,
-    depositsBase: 7,
+    depositsBase: 16,
     depositShardsMin: 10,
     depositShardsMax: 18,
     depositTierExponent: 1.3,

@@ -6,7 +6,7 @@ import {
   shipCost, shipStats, tradeValuePerUnit, unlockThreshold, type Cost,
 } from '../game/economy';
 import { canJump, expeditionShips } from '../game/expedition';
-import { nodeAt, nodeById, shipById } from '../game/state';
+import { nodeById, nodeNear, shipById } from '../game/state';
 import type { GameState, Job, Ship, ShipType } from '../game/types';
 import { esc, fmt, fmt1, fmtTime } from './format';
 import type { UIState } from './ui-state';
@@ -73,7 +73,7 @@ function selectionPanel(s: GameState, ui: UIState): string {
   if (ui.view === 'expedition') return expeditionHelp(s);
   return `
     <h2>Heimat-Sektor</h2>
-    <p>Tippe auf ein Schiff, um es auszuwählen, dann auf ein Feld, um es dorthin zu schicken.</p>
+    <p>Tippe auf ein Schiff, um es auszuwählen, dann irgendwo auf die Karte, um es dorthin zu schicken. Karte ziehen zum Verschieben, Mausrad oder zwei Finger zum Zoomen.</p>
     <ul class="hints">
       <li><b>Planeten</b> kolonisieren: liefern dauerhaft Credits oder Erz.</li>
       <li><b>Frachter</b> zwischen zwei <b>Handelsposten</b> pendeln lassen: je weiter, desto mehr Credits.</li>
@@ -97,7 +97,7 @@ function incomeSummary(s: GameState): string {
 
 function nodePanel(s: GameState, id: string): string {
   const n = nodeById(s, id)!;
-  const shipsHere = s.ships.filter((x) => x.location === 'home' && x.hex.q === n.hex.q && x.hex.r === n.hex.r);
+  const shipsHere = s.ships.filter((x) => x.location === 'home' && !x.target && nodeNear(s, x.pos)?.id === n.id);
   const shipList = shipsHere.length
     ? `<div class="muted small">Schiffe hier:</div>${shipsHere.map((x) => btn('selectShip', `${CONFIG.ships[x.type].name} ${esc(x.name)}`, { arg: x.id, kind: 'ghost' })).join(' ')}`
     : '';
@@ -140,9 +140,9 @@ function shipPanel(s: GameState, ship: Ship): string {
       ${st.dps ? `<div>Schaden <b>${fmt1(st.dps)}</b>/s</div>` : ''}
       ${ship.location === 'home' ? `<div>Ladung <b>${fmt(ship.cargo)}</b>/${fmt(st.cargoHome)}</div>` : `<div>Splitter <b>${fmt(ship.shards)}</b>/${fmt(st.cargoExp)}</div>`}
     </div>`;
-  const status = ship.path.length ? '<p class="muted small">unterwegs …</p>' : '';
+  const status = ship.target ? '<p class="muted small">unterwegs …</p>' : '';
   if (ship.location === 'expedition') {
-    return `${head}${status}<p class="muted small">Tippe auf ein Feld, um zu fliegen. Am Sprungtor kann das Schiff heimspringen.</p>
+    return `${head}${status}<p class="muted small">Tippe irgendwo auf die Karte, um dorthin zu fliegen. Am Sprungtor kann das Schiff heimspringen.</p>
       ${btn('jump', 'Heimsprung', { arg: ship.id, disabled: !canJump(ship), kind: 'primary' })}
       ${btn('deselect', 'Abwählen', { kind: 'ghost' })}`;
   }
@@ -153,8 +153,8 @@ function shipPanel(s: GameState, ship: Ship): string {
     route = `<div class="card">Pendelroute: <b>${esc(a.name)} ↔ ${esc(b.name)}</b><br>${btn('stopShuttle', 'Route beenden', { arg: ship.id, kind: 'ghost' })}</div>`;
   } else {
     const targets = shuttleTargets(s, ship.id);
-    const here = nodeAt(s, ship.hex);
-    if (targets.length && !ship.path.length) {
+    const here = nodeNear(s, ship.pos);
+    if (targets.length && !ship.target) {
       route = `<div class="card"><div class="muted small">Automatisch pendeln ab ${esc(here!.name)}:</div>
         ${targets.map((id) => btn('shuttle', `↔ ${esc(nodeById(s, id)!.name)}`, { arg: `${ship.id}|${id}` })).join(' ')}</div>`;
     } else if (ship.type !== 'warden') {
@@ -169,8 +169,8 @@ function expeditionHelp(s: GameState): string {
   if (!ex) return '<p>Keine Expedition aktiv.</p>';
   const ships = expeditionShips(s);
   return `<h2>Anomalie Stufe ${ex.tier}</h2>
-    <p>Schürfer auf <b class="sh-t">Splitter-Vorkommen</b> schicken. Frachter auf dasselbe Feld nehmen die Splitter auf.
-    Wächter halten die Gegner fern. Zurück zum <b>Sprungtor</b> und heimspringen, bevor die Zeit abläuft.</p>
+    <p>Schürfer auf <b class="sh-t">Splitter-Vorkommen</b> schicken. Ein Frachter direkt daneben übernimmt die Splitter.
+    Wächter in der Nähe ziehen das Feuer der Gegner auf sich. Zurück zum <b>Sprungtor</b> und heimspringen, bevor die Zeit abläuft.</p>
     <div class="card">Restzeit <b>${fmtTime(ex.duration - ex.elapsed)}</b> · Welle ${ex.waveIndex} · Gegner ${ex.enemies.length}</div>
     ${ships.map((x) => btn('selectShip', `${CONFIG.ships[x.type].name} ${esc(x.name)} ◆${Math.floor(x.shards)}`, { arg: x.id, kind: 'ghost' })).join(' ')}
     <div class="row">${btn('recall', 'Alle zum Tor')} ${btn('jumpAll', 'Alle am Tor: Heimsprung', { kind: 'primary' })}</div>`;
@@ -200,7 +200,7 @@ function yardPanel(s: GameState): string {
     }).join('')}
     <h3>Flotte</h3>
     ${s.ships.map((x) => `<div class="fleet">${btn('selectShip', `${CONFIG.ships[x.type].name} ${esc(x.name)}`, { arg: x.id, kind: 'ghost' })}
-      <span class="muted small">${x.location === 'expedition' ? 'in Expedition' : x.shuttle ? 'pendelt' : x.path.length ? 'unterwegs' : 'bereit'}</span></div>`).join('') || '<p class="muted">Keine Schiffe.</p>'}`;
+      <span class="muted small">${x.location === 'expedition' ? 'in Expedition' : x.shuttle ? 'pendelt' : x.target ? 'unterwegs' : 'bereit'}</span></div>`).join('') || '<p class="muted">Keine Schiffe.</p>'}`;
 }
 
 // ---- Research ----------------------------------------------------------------

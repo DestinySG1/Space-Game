@@ -1,11 +1,15 @@
 import { CONFIG } from './config';
 import { shipStats } from './economy';
+import { center, dist, parkingSpot } from './geom';
 import { hex, hexDistance, hexesInRadius } from './hex';
 import { makeRng } from './rng';
-import type { GameState, Hex, LogEntry, SectorNode, Ship, ShipType } from './types';
+import type { GameState, Hex, LogEntry, SectorNode, Ship, ShipType, Vec } from './types';
 
-const PLANET_NAMES = ['Veyra', 'Kessa', 'Orun', 'Talis', 'Myrr', 'Ondra', 'Pell', 'Sarn', 'Ivo', 'Tesh'];
-const STATION_NAMES = ['Posten Ilk', 'Posten Duna', 'Posten Rhee', 'Posten Varn'];
+const PLANET_NAMES = [
+  'Veyra', 'Kessa', 'Orun', 'Talis', 'Myrr', 'Ondra', 'Pell', 'Sarn', 'Ivo', 'Tesh', 'Calder', 'Nimra',
+  'Brask', 'Eloa', 'Fenn', 'Gaudi', 'Hollis', 'Juno', 'Karst', 'Lysa', 'Mavro', 'Nox',
+];
+const STATION_NAMES = ['Posten Ilk', 'Posten Duna', 'Posten Rhee', 'Posten Varn', 'Posten Sol', 'Posten Tamm', 'Posten Ura', 'Posten Wend'];
 const SHIP_NAMES = ['Kranich', 'Möwe', 'Falke', 'Elster', 'Reiher', 'Dohle', 'Milan', 'Lerche', 'Specht', 'Ibis'];
 
 export function newGame(seed = Date.now() % 1_000_000): GameState {
@@ -78,9 +82,9 @@ export function addShip(s: GameState, type: ShipType): Ship {
     type,
     name: `${SHIP_NAMES[(n - 1) % SHIP_NAMES.length]}${n > SHIP_NAMES.length ? ` ${Math.ceil(n / SHIP_NAMES.length)}` : ''}`,
     location: 'home',
-    hex: { ...baseNode(s).hex },
-    path: [],
-    progress: 0,
+    pos: { x: 0, y: 0 },
+    target: null,
+    heading: -Math.PI / 2,
     hull: st.hull,
     shield: st.shield,
     lastHit: -999,
@@ -89,6 +93,7 @@ export function addShip(s: GameState, type: ShipType): Ship {
     shards: 0,
     shuttle: null,
   };
+  ship.pos = parkingSpot(center(baseNode(s).hex), ship.id, CONFIG.ranges.park);
   s.ships.push(ship);
   return ship;
 }
@@ -96,6 +101,20 @@ export function addShip(s: GameState, type: ShipType): Ship {
 export const baseNode = (s: GameState) => s.nodes.find((n) => n.kind === 'base')!;
 export const nodeById = (s: GameState, id: string | null) => s.nodes.find((n) => n.id === id);
 export const nodeAt = (s: GameState, h: Hex) => s.nodes.find((n) => n.hex.q === h.q && n.hex.r === h.r);
+
+/** The node a position is docked at (within the dock range), if any. */
+export function nodeNear(s: GameState, p: Vec, range: number = CONFIG.ranges.dock): SectorNode | undefined {
+  let best: SectorNode | undefined;
+  let bestD = range;
+  for (const n of s.nodes) {
+    const d = dist(center(n.hex), p);
+    if (d <= bestD) {
+      best = n;
+      bestD = d;
+    }
+  }
+  return best;
+}
 export const shipById = (s: GameState, id: string | null) => s.ships.find((x) => x.id === id);
 
 export function log(s: GameState, msg: string): void {

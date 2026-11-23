@@ -3,6 +3,12 @@ export interface Hex {
   r: number;
 }
 
+/** Continuous position in world units (hex radius = 1). */
+export interface Vec {
+  x: number;
+  y: number;
+}
+
 export type ShipType = 'hauler' | 'miner' | 'warden';
 export type ModuleId =
   | 'cargoBay'
@@ -32,9 +38,9 @@ export interface Ship {
   type: ShipType;
   name: string;
   location: 'home' | 'expedition';
-  hex: Hex;
-  path: Hex[];
-  progress: number; // 0..1 along the way to path[0]
+  pos: Vec;
+  target: Vec | null; // where it is flying to, null when standing still
+  heading: number; // radians, kept while standing
   hull: number;
   shield: number;
   lastHit: number;
@@ -56,9 +62,9 @@ export type EnemyType = 'skirmisher' | 'colossus';
 export interface Enemy {
   id: string;
   type: EnemyType;
-  hex: Hex;
-  path: Hex[];
-  progress: number;
+  pos: Vec;
+  target: Vec | null;
+  heading: number;
   hp: number;
   maxHp: number;
   dps: number;

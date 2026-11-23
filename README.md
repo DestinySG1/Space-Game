@@ -18,7 +18,8 @@ npm run balance    # Balancing-Bots: Heimat-Fortschritt und Expeditions-Überleb
 ## Spielen
 
 - Karte ziehen zum Verschieben, Mausrad / zwei Finger / Buttons +, −, ⌂ zum Zoomen.
-- Schiff antippen, dann ein Feld antippen: Das Schiff fliegt dorthin.
+- Schiff antippen, dann irgendeinen Punkt auf der Karte antippen: Das Schiff fliegt direkt dorthin
+  und bleibt dort stehen.
 - Frachter an einem Handelsposten → Pendelroute zu einem anderen Posten einrichten.
 - Schürfer an einem Gürtel oder an der Basis → Pendelroute einrichten.
 - Planeten antippen → kolonisieren und ausbauen.

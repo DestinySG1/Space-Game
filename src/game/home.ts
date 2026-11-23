@@ -1,41 +1,16 @@
-// Home sector simulation: colonies, trade, mining, ship travel and build queues.
-import { CONFIG } from './config';
+// Home sector simulation: colonies, trade, mining, free ship flight and build queues.
+import { CONFIG, MODULES } from './config';
 import { passiveIncome, shipStats, tradeValuePerUnit } from './economy';
-import { hexEq, hexLine } from './hex';
-import { addShip, baseNode, log, nodeAt, nodeById } from './state';
-import type { GameState, Hex, ModuleId, Ship } from './types';
-import { MODULES } from './config';
+import { center, dist, fly, parkingSpot } from './geom';
+import { addShip, baseNode, log, nodeById, nodeNear } from './state';
+import type { GameState, ModuleId, SectorNode, Ship, Vec } from './types';
 
-export interface Mover {
-  hex: Hex;
-  path: Hex[];
-  progress: number;
+export function sendTo(m: { target: Vec | null }, to: Vec): void {
+  m.target = { ...to };
 }
 
-/** Advance along the path. Returns true while still travelling. */
-export function advance(m: Mover, speed: number, dt: number): boolean {
-  if (m.path.length === 0) {
-    m.progress = 0;
-    return false;
-  }
-  m.progress += speed * dt;
-  while (m.progress >= 1 && m.path.length > 0) {
-    m.hex = m.path.shift()!;
-    m.progress -= 1;
-  }
-  if (m.path.length === 0) m.progress = 0;
-  return m.path.length > 0;
-}
-
-export function sendTo(m: Mover, target: Hex): void {
-  const last = m.path[m.path.length - 1];
-  if (last && hexEq(last, target)) return; // already on the way, keep going
-  const next = m.path[0];
-  const path = hexEq(m.hex, target) ? [] : hexLine(m.hex, target);
-  // keep progress if the first step stays the same, so re-routing mid-flight doesn't stall
-  m.progress = next && path[0] && hexEq(next, path[0]) ? m.progress : 0;
-  m.path = path;
-}
+/** Where a ship parks at a node: its own spot on a small ring around it. */
+export const dockAt = (ship: Ship, node: SectorNode): Vec => parkingSpot(center(node.hex), ship.id, CONFIG.ranges.park);
 
 export function tickHome(s: GameState, dt: number): void {
   const inc = passiveIncome(s);
@@ -60,39 +35,33 @@ function tickHomeShip(s: GameState, ship: Ship, dt: number): void {
   ship.hull = Math.min(st.hull, ship.hull + st.hull * 0.05 * dt);
   ship.shield = Math.min(st.shield, ship.shield + st.shield * 0.1 * dt);
 
-  if (advance(ship, st.speedHome, dt)) return;
-  const here = nodeAt(s, ship.hex);
+  if (fly(ship, st.speedHome, dt)) return;
+  const here = nodeNear(s, ship.pos);
   if (!here) return;
 
   if (ship.type === 'hauler' && here.kind === 'station') {
     // sell goods that came from another station
     if (ship.cargo > 0 && ship.cargoOrigin && ship.cargoOrigin !== here.id) {
       const origin = nodeById(s, ship.cargoOrigin)!;
-      const earned = ship.cargo * tradeValuePerUnit(s, origin, here);
-      s.credits += earned;
+      s.credits += ship.cargo * tradeValuePerUnit(s, origin, here);
       ship.cargo = 0;
       ship.cargoOrigin = null;
     }
     // load local goods
     if (ship.cargo === 0 || ship.cargoOrigin === here.id) {
-      const space = st.cargoHome - ship.cargo;
-      const take = Math.min(space, Math.floor(here.stock));
+      const take = Math.min(st.cargoHome - ship.cargo, Math.floor(here.stock));
       if (take > 0) {
         here.stock -= take;
         ship.cargo += take;
         ship.cargoOrigin = here.id;
       }
     }
-    if (ship.shuttle && ship.cargo > 0) {
-      const full = ship.cargo >= st.cargoHome;
-      if (full || here.stock < 1) goOtherEnd(s, ship, here.id);
-    }
+    if (ship.shuttle && ship.cargo > 0 && (ship.cargo >= st.cargoHome || here.stock < 1)) goOtherEnd(s, ship, here.id);
   }
 
   if (ship.type === 'miner') {
     if (here.kind === 'asteroid') {
-      const space = st.cargoHome - ship.cargo;
-      const mined = Math.min(st.mineHome * dt, space, here.ore);
+      const mined = Math.min(st.mineHome * dt, st.cargoHome - ship.cargo, here.ore);
       ship.cargo += mined;
       here.ore -= mined;
       if (ship.shuttle && (ship.cargo >= st.cargoHome - 1e-6 || (here.ore < 1 && ship.cargo > 0))) {
@@ -110,7 +79,7 @@ function goOtherEnd(s: GameState, ship: Ship, hereId: string): void {
   if (!ship.shuttle) return;
   const targetId = ship.shuttle.a === hereId ? ship.shuttle.b : ship.shuttle.b === hereId ? ship.shuttle.a : null;
   const target = nodeById(s, targetId);
-  if (target) sendTo(ship, target.hex);
+  if (target) sendTo(ship, dockAt(ship, target));
 }
 
 function tickQueues(s: GameState, dt: number): void {
@@ -136,7 +105,7 @@ function tickQueues(s: GameState, dt: number): void {
   }
 }
 
-/** After an upgrade, keep current hull/shield ratio but apply the new maximums. */
+/** After an upgrade, keep current hull/shield but never above the new maximums. */
 export function refreshStats(s: GameState): void {
   for (const ship of s.ships) {
     const st = shipStats(s, ship.type);
@@ -145,4 +114,5 @@ export function refreshStats(s: GameState): void {
   }
 }
 
-export const baseHex = (s: GameState) => baseNode(s).hex;
+export const basePos = (s: GameState) => center(baseNode(s).hex);
+export { dist };

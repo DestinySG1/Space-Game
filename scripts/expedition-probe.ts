@@ -4,6 +4,7 @@ import * as A from '../src/game/actions';
 import { CONFIG } from '../src/game/config';
 import { GATE, expeditionShips } from '../src/game/expedition';
 import { hexDistance } from '../src/game/hex';
+import { center, dist } from '../src/game/geom';
 import { step } from '../src/game/sim';
 import { addShip, newGame } from '../src/game/state';
 import type { ShipType } from '../src/game/types';
@@ -18,17 +19,18 @@ function run(tier: number, fleet: ShipType[], research = 0, seed = 1) {
   A.launchExpedition(s, tier, ids, seed * 7);
   const ex = s.expedition!;
   const dep = [...ex.deposits].sort((a, b) => hexDistance(a.hex, GATE) - hexDistance(b.hex, GATE))[0];
-  for (const sh of expeditionShips(s)) A.moveShip(s, sh.id, dep.hex);
+  for (const sh of expeditionShips(s)) A.moveShip(s, sh.id, center(dep.hex));
   let recalled = false;
   while (s.expedition) {
     step(s, 1);
     const e = s.expedition;
     if (!e) break;
     // move to the next deposit when this one runs dry
-    const cur = e.deposits.find((d) => d.hex.q === expeditionShips(s)[0]?.hex.q && d.hex.r === expeditionShips(s)[0]?.hex.r);
+    const lead = expeditionShips(s)[0];
+    const cur = lead && !lead.target ? e.deposits.find((d) => dist(center(d.hex), lead.pos) <= 0.8) : undefined;
     if (!recalled && cur && cur.shards <= 0) {
       const next = [...e.deposits].filter((d) => d.shards > 0).sort((a, b) => hexDistance(a.hex, cur.hex) - hexDistance(b.hex, cur.hex))[0];
-      if (next) for (const sh of expeditionShips(s)) A.moveShip(s, sh.id, next.hex);
+      if (next) for (const sh of expeditionShips(s)) A.moveShip(s, sh.id, center(next.hex));
     }
     if (!recalled && e.duration - e.elapsed < 150) {
       A.recallAllToGate(s);

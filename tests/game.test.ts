@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import * as A from '../src/game/actions';
 import { CONFIG } from '../src/game/config';
 import { colonizeCost, researchCost, shipStats } from '../src/game/economy';
-import { GATE, expeditionShips } from '../src/game/expedition';
+import { GATE_POS, canJump, expeditionShips } from '../src/game/expedition';
+import { center, dist } from '../src/game/geom';
 import { hex, hexDistance, hexLine, hexesInRadius, pixelToHex, hexToPixel } from '../src/game/hex';
 import { load, save, simulateOffline, step } from '../src/game/sim';
 import { addShip, newGame } from '../src/game/state';
@@ -51,7 +52,7 @@ describe('home economy', () => {
     const s = newGame(2);
     const [a, b] = stations(s);
     const hauler = s.ships.find((x) => x.type === 'hauler')!;
-    hauler.hex = { ...a.hex };
+    hauler.pos = center(a.hex);
     step(s, 0.1); // loads goods
     expect(hauler.cargo).toBeGreaterThan(0);
     expect(A.setShuttle(s, hauler.id, b.id).ok).toBe(true);
@@ -94,6 +95,36 @@ describe('home economy', () => {
   });
 });
 
+describe('free flight', () => {
+  it('flies to any point on the map, stops there and stays still', () => {
+    const s = newGame(20);
+    const ship = s.ships[0];
+    const to = { x: 3.3, y: -2.1 }; // not a hex centre
+    expect(A.moveShip(s, ship.id, to).ok).toBe(true);
+    step(s, 120);
+    expect(dist(ship.pos, to)).toBeLessThan(1e-9);
+    expect(ship.target).toBeNull();
+    const rest = { ...ship.pos };
+    step(s, 30);
+    expect(ship.pos).toEqual(rest);
+  });
+
+  it('refuses points outside the sector and parks ships on separate spots', () => {
+    const s = newGame(21);
+    expect(A.moveShip(s, s.ships[0].id, { x: 100, y: 0 }).ok).toBe(false);
+    expect(dist(s.ships[0].pos, s.ships[1].pos)).toBeGreaterThan(0.05);
+  });
+
+  it('enemies keep a firing distance instead of stacking on a ship', () => {
+    const s = newGame(22);
+    s.beacons[1] = 1;
+    const w = addShip(s, 'warden');
+    A.launchExpedition(s, 1, [w.id], 23);
+    step(s, CONFIG.expedition.firstWave + 30);
+    for (const en of s.expedition!.enemies) expect(dist(en.pos, w.pos)).toBeGreaterThan(0.5);
+  });
+});
+
 describe('expedition', () => {
   function ready(seed: number) {
     const s = newGame(seed);
@@ -110,7 +141,7 @@ describe('expedition', () => {
     expect(A.launchExpedition(s, 1, ids).ok).toBe(false);
     s.beacons[1] = 1;
     expect(A.launchExpedition(s, 1, ids, 7).ok).toBe(true);
-    expect(expeditionShips(s).every((x) => x.hex.q === GATE.q && x.hex.r === GATE.r)).toBe(true);
+    expect(expeditionShips(s).every(canJump)).toBe(true);
   });
 
   it('banks mined shards on jump and unlocks the next tier', () => {
@@ -118,11 +149,11 @@ describe('expedition', () => {
     const miner = s.ships.find((x) => x.type === 'miner')!;
     A.launchExpedition(s, 1, [miner.id], 9);
     const dep = s.expedition!.deposits[0];
-    miner.hex = { ...dep.hex };
+    miner.pos = center(dep.hex);
     step(s, 30); // before the first wave
     expect(miner.shards).toBeGreaterThan(0);
     miner.shards = 30; // pretend it filled up
-    miner.hex = { ...GATE };
+    miner.pos = { ...GATE_POS };
     expect(A.jump(s, miner.id).ok).toBe(true);
     expect(s.shards).toBe(30);
     expect(s.expedition).toBeNull();

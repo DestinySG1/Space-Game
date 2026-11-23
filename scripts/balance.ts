@@ -5,6 +5,7 @@ import { colonizeCost, canAfford, passiveIncome, planetUpgradeCost, shipCost } f
 import { step } from '../src/game/sim';
 import { newGame } from '../src/game/state';
 import { hexDistance } from '../src/game/hex';
+import { center } from '../src/game/geom';
 
 const s = newGame(1234);
 const stations = s.nodes.filter((n) => n.kind === 'station');
@@ -13,7 +14,7 @@ let pair = [stations[0], stations[1]];
 for (const a of stations) for (const b of stations) if (hexDistance(a.hex, b.hex) > hexDistance(pair[0].hex, pair[1].hex)) pair = [a, b];
 const hauler = s.ships.find((x) => x.type === 'hauler')!;
 const miner = s.ships.find((x) => x.type === 'miner')!;
-A.moveShip(s, hauler.id, pair[0].hex);
+A.moveShip(s, hauler.id, center(pair[0].hex));
 A.setShuttle(s, miner.id, s.nodes.find((n) => n.kind === 'asteroid')!.id);
 
 const milestones: string[] = [];
@@ -24,7 +25,7 @@ let beacon = false;
 
 for (let t = 0; t < 4 * 3600; t += 5) {
   step(s, 5);
-  if (!shuttleSet && hauler.path.length === 0) {
+  if (!shuttleSet && !hauler.target) {
     A.setShuttle(s, hauler.id, pair[1].id);
     shuttleSet = true;
   }

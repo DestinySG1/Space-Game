@@ -3,11 +3,11 @@ import { CONFIG, MODULES } from './config';
 import {
   beaconCost, canAfford, colonizeCost, hangarSlots, hangarUpgradeCost, pay, planetUpgradeCost, researchCost, shipCost,
 } from './economy';
-import { GATE, canJump, createExpedition, expeditionShips, jumpHome } from './expedition';
-import { hexDistance, hexEq } from './hex';
-import { sendTo } from './home';
-import { log, nodeAt, nodeById, shipById } from './state';
-import type { GameState, Hex, ModuleId, ShipType } from './types';
+import { GATE_POS, canJump, createExpedition, expeditionShips, gateSpot, jumpHome } from './expedition';
+import { dist, insideMap } from './geom';
+import { dockAt, sendTo } from './home';
+import { log, nodeById, nodeNear, shipById } from './state';
+import type { GameState, ModuleId, ShipType, Vec } from './types';
 
 export interface Result {
   ok: boolean;
@@ -79,11 +79,12 @@ export function craftBeacon(s: GameState, tier: number): Result {
   return ok(`Sprungkern Stufe ${tier} wird geschmiedet.`);
 }
 
-export function moveShip(s: GameState, shipId: string, to: Hex): Result {
+/** Fly a ship to any point on its map. */
+export function moveShip(s: GameState, shipId: string, to: Vec): Result {
   const ship = shipById(s, shipId);
   if (!ship) return fail('Schiff nicht gefunden.');
   const radius = ship.location === 'home' ? CONFIG.sector.radius : CONFIG.expedition.radius;
-  if (hexDistance(to, { q: 0, r: 0 }) > radius) return fail('Außerhalb der Karte.');
+  if (!insideMap(to, radius)) return fail('Außerhalb der Karte.');
   ship.shuttle = null;
   sendTo(ship, to);
   return ok(`${ship.name} fliegt los.`);
@@ -92,8 +93,8 @@ export function moveShip(s: GameState, shipId: string, to: Hex): Result {
 /** Valid shuttle partners for a ship that is idle at a node. */
 export function shuttleTargets(s: GameState, shipId: string): string[] {
   const ship = shipById(s, shipId);
-  if (!ship || ship.location !== 'home') return [];
-  const here = nodeAt(s, ship.hex);
+  if (!ship || ship.location !== 'home' || ship.target) return [];
+  const here = nodeNear(s, ship.pos);
   if (!here) return [];
   if (ship.type === 'hauler' && here.kind === 'station') {
     return s.nodes.filter((n) => n.kind === 'station' && n.id !== here.id).map((n) => n.id);
@@ -107,13 +108,13 @@ export function shuttleTargets(s: GameState, shipId: string): string[] {
 
 export function setShuttle(s: GameState, shipId: string, targetId: string): Result {
   const ship = shipById(s, shipId);
-  const here = ship && nodeAt(s, ship.hex);
+  const here = ship && nodeNear(s, ship.pos);
   const target = nodeById(s, targetId);
   if (!ship || !here || !target || !shuttleTargets(s, shipId).includes(targetId)) return fail('Route nicht möglich.');
   ship.shuttle = { a: here.id, b: target.id };
   // a hauler sitting on its own goods or a miner still mining stays until full; otherwise leave now
   const waitForCargo = (ship.type === 'hauler' && ship.cargo === 0) || (ship.type === 'miner' && here.kind === 'asteroid');
-  if (!waitForCargo) sendTo(ship, target.hex);
+  if (!waitForCargo) sendTo(ship, dockAt(ship, target));
   return ok(`Pendelroute ${here.name} ↔ ${target.name} aktiv.`);
 }
 
@@ -135,9 +136,8 @@ export function launchExpedition(s: GameState, tier: number, shipIds: string[], 
   for (const ship of ships) {
     if (!ship) continue;
     ship.location = 'expedition';
-    ship.hex = { ...GATE };
-    ship.path = [];
-    ship.progress = 0;
+    ship.pos = gateSpot(ship);
+    ship.target = null;
     ship.cargo = 0;
     ship.cargoOrigin = null;
     ship.shuttle = null;
@@ -162,6 +162,6 @@ export function jumpAllAtGate(s: GameState): Result {
 
 export function recallAllToGate(s: GameState): Result {
   const ships = expeditionShips(s);
-  for (const ship of ships) if (!hexEq(ship.hex, GATE)) sendTo(ship, GATE);
+  for (const ship of ships) if (dist(ship.pos, GATE_POS) > CONFIG.ranges.gate * 0.6) sendTo(ship, gateSpot(ship));
   return ok('Alle Schiffe fliegen zum Sprungtor.');
 }

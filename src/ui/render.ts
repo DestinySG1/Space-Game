@@ -1,10 +1,11 @@
-// Canvas drawing for the home sector and the expedition map, with camera, smooth flight and effects.
+// Canvas drawing for the home sector and the expedition map: camera, free flight, effects.
 import { CONFIG } from '../game/config';
 import { shipStats } from '../game/economy';
-import { GATE, expeditionShips } from '../game/expedition';
-import { hexDistance, hexEq, hexLine, hexToPixel, hexesInRadius } from '../game/hex';
-import { nodeAt, nodeById } from '../game/state';
-import type { Enemy, GameState, Hex, Ship } from '../game/types';
+import { GATE_POS, depositNear, enemyTarget, expeditionShips, nearest } from '../game/expedition';
+import { center, dist } from '../game/geom';
+import { hexesInRadius } from '../game/hex';
+import { nodeById, nodeNear } from '../game/state';
+import type { Enemy, GameState, Ship, Vec } from '../game/types';
 import { clampCamera, type Camera } from './camera';
 import {
   SHIP_COLORS, drawAsteroids, drawBackground, drawBase, drawBeam, drawCrystals, drawEnemySprite, drawGate, drawPlanet,
@@ -13,8 +14,7 @@ import {
 import type { UIState } from './ui-state';
 
 const C = {
-  grid: 'rgba(120,150,220,0.09)',
-  gridHover: 'rgba(140,180,255,0.16)',
+  grid: 'rgba(120,150,220,0.08)',
   sel: '#ffffff',
   text: '#dbe4ff',
   dim: '#8692b5',
@@ -28,7 +28,7 @@ const C = {
 export interface View {
   cx: number;
   cy: number;
-  size: number; // screen pixels per hex (radius)
+  size: number; // screen pixels per world unit (= hex radius)
   radius: number;
 }
 
@@ -43,78 +43,33 @@ export function computeView(w: number, h: number, radius: number, cam: Camera): 
   return { cx: w / 2 + cam.x, cy: h / 2 + cam.y, size: base * cam.zoom, radius, base };
 }
 
-const world = (h: Hex) => hexToPixel(h, 1);
-const toScreen = (v: View, p: { x: number; y: number }) => ({ x: v.cx + p.x * v.size, y: v.cy + p.y * v.size });
-const hexScreen = (v: View, h: Hex) => toScreen(v, world(h));
+export const toScreen = (v: View, p: Vec) => ({ x: v.cx + p.x * v.size, y: v.cy + p.y * v.size });
+export const toWorld = (v: View, x: number, y: number): Vec => ({ x: (x - v.cx) / v.size, y: (y - v.cy) / v.size });
 
-// ---- smooth visual motion ------------------------------------------------------------
+// ---- engine trails (visual only) ------------------------------------------------------
 
-interface Visual {
-  x: number;
-  y: number;
-  a: number;
-  thrust: number;
-  trail: { x: number; y: number }[];
-  seen: number;
-}
-const visuals = new Map<string, Visual>();
+const trails = new Map<string, { pts: Vec[]; seen: number }>();
 
-/** Exact simulated position of something moving along a hex path (world units). */
-function simPos(m: { hex: Hex; path: Hex[]; progress: number }) {
-  const a = world(m.hex);
-  if (!m.path.length) return { ...a, moving: false, dir: 0 };
-  const b = world(m.path[0]);
-  return { x: a.x + (b.x - a.x) * m.progress, y: a.y + (b.y - a.y) * m.progress, moving: true, dir: Math.atan2(b.y - a.y, b.x - a.x) };
-}
-
-function lerpAngle(a: number, b: number, k: number) {
-  const d = Math.atan2(Math.sin(b - a), Math.cos(b - a));
-  return a + d * k;
-}
-
-/**
- * Ease the drawn position toward the simulated one. Idle things circle their hex slowly,
- * moving things face their direction and leave a short engine trail.
- */
-function animate(key: string, m: { hex: Hex; path: Hex[]; progress: number }, now: number, dt: number, orbit: number, orbitSpeed: number): Visual {
-  const p = simPos(m);
-  const seed = hashId(key);
-  let tx = p.x;
-  let ty = p.y;
-  let ta = p.dir;
-  if (!p.moving && orbit > 0) {
-    const dirSign = seed % 2 ? 1 : -1;
-    const phase = ((seed % 1000) / 1000) * Math.PI * 2 + (now / 1000) * orbitSpeed * dirSign;
-    tx += Math.cos(phase) * orbit;
-    ty += Math.sin(phase) * orbit;
-    ta = phase + (Math.PI / 2) * dirSign;
+function trailFor(key: string, pos: Vec, moving: boolean, now: number): Vec[] {
+  let t = trails.get(key);
+  if (!t) {
+    t = { pts: [], seen: now };
+    trails.set(key, t);
   }
-  let v = visuals.get(key);
-  if (!v || Math.hypot(v.x - tx, v.y - ty) > 3) {
-    v = { x: tx, y: ty, a: ta, thrust: 0, trail: [], seen: now };
-    visuals.set(key, v);
+  const last = t.pts[t.pts.length - 1];
+  if (moving && (!last || dist(last, pos) > 0.03)) {
+    t.pts.push({ ...pos });
+    if (t.pts.length > 30) t.pts.shift();
+  } else if (!moving && t.pts.length) {
+    t.pts.shift();
   }
-  const k = 1 - Math.exp(-dt * 6);
-  const px = v.x;
-  const py = v.y;
-  v.x += (tx - v.x) * k;
-  v.y += (ty - v.y) * k;
-  const speed = Math.hypot(v.x - px, v.y - py) / Math.max(dt, 1e-3);
-  if (speed > 0.02) ta = Math.atan2(v.y - py, v.x - px);
-  v.a = lerpAngle(v.a, ta, 1 - Math.exp(-dt * 8));
-  v.thrust += ((p.moving ? 1 : 0.15) - v.thrust) * (1 - Math.exp(-dt * 4));
-  if (p.moving) {
-    v.trail.push({ x: v.x, y: v.y });
-    if (v.trail.length > 26) v.trail.shift();
-  } else if (v.trail.length) {
-    v.trail.shift();
-  }
-  v.seen = now;
-  return v;
+  if (last && dist(last, pos) > 3) t.pts = []; // jumped (e.g. through the gate)
+  t.seen = now;
+  return t.pts;
 }
 
-function pruneVisuals(now: number) {
-  for (const [k, v] of visuals) if (now - v.seen > 2000) visuals.delete(k);
+function pruneTrails(now: number) {
+  for (const [k, t] of trails) if (now - t.seen > 2000) trails.delete(k);
 }
 
 // ---- shared pieces ---------------------------------------------------------------
@@ -131,18 +86,37 @@ function hexPath(ctx: CanvasRenderingContext2D, x: number, y: number, size: numb
   ctx.closePath();
 }
 
-function drawGrid(ctx: CanvasRenderingContext2D, v: View, ui: UIState) {
+/** Faint hex grid as a sense of scale; fades out when zoomed far out. */
+function drawGrid(ctx: CanvasRenderingContext2D, v: View, w: number, h: number) {
+  if (v.size < 7) return;
   ctx.lineWidth = 1;
-  for (const h of hexesInRadius(v.radius)) {
-    const p = hexScreen(v, h);
+  ctx.strokeStyle = C.grid;
+  ctx.globalAlpha = Math.min(1, (v.size - 7) / 15);
+  for (const hx of hexesInRadius(v.radius)) {
+    const p = toScreen(v, center(hx));
+    if (p.x < -v.size || p.y < -v.size || p.x > w + v.size || p.y > h + v.size) continue;
     hexPath(ctx, p.x, p.y, v.size * 0.98);
-    if (ui.hoverHex && hexEq(ui.hoverHex, h)) {
-      ctx.fillStyle = C.gridHover;
-      ctx.fill();
-    }
-    ctx.strokeStyle = C.grid;
     ctx.stroke();
   }
+  ctx.globalAlpha = 1;
+}
+
+/** Outline of the map so the edge of the sector is visible. */
+function drawBorder(ctx: CanvasRenderingContext2D, v: View, color: string) {
+  const R = v.radius + 0.5;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 8]);
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI / 180) * (60 * i);
+    const p = toScreen(v, { x: Math.cos(a) * R * Math.sqrt(3), y: Math.sin(a) * R * Math.sqrt(3) });
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function bar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, frac: number, color: string) {
@@ -163,15 +137,17 @@ function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number
   ctx.fillText(text, x, y);
 }
 
-function drawTrail(ctx: CanvasRenderingContext2D, v: View, vis: Visual, color: string, width: number) {
-  if (vis.trail.length < 2) return;
+function drawTrail(ctx: CanvasRenderingContext2D, v: View, pts: Vec[], head: Vec, color: string, width: number) {
+  if (pts.length < 2) return;
   ctx.lineCap = 'round';
-  for (let i = 1; i < vis.trail.length; i++) {
-    const a = toScreen(v, vis.trail[i - 1]);
-    const b = toScreen(v, vis.trail[i]);
-    ctx.globalAlpha = (i / vis.trail.length) * 0.5;
+  const all = [...pts, head];
+  for (let i = 1; i < all.length; i++) {
+    const a = toScreen(v, all[i - 1]);
+    const b = toScreen(v, all[i]);
+    const f = i / all.length;
+    ctx.globalAlpha = f * 0.5;
     ctx.strokeStyle = color;
-    ctx.lineWidth = width * (i / vis.trail.length);
+    ctx.lineWidth = width * f;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -180,32 +156,55 @@ function drawTrail(ctx: CanvasRenderingContext2D, v: View, vis: Visual, color: s
   ctx.globalAlpha = 1;
 }
 
-function drawPreview(ctx: CanvasRenderingContext2D, v: View, ui: UIState, ship: Ship | undefined) {
-  if (!ship || !ui.hoverHex) return;
-  const from = ship.path.length ? ship.path[0] : ship.hex;
-  if (hexEq(from, ui.hoverHex)) return;
-  ctx.setLineDash([4, 6]);
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-  ctx.lineWidth = 1.5;
+/** Destination marker and line for ships that are flying somewhere. */
+function drawCourse(ctx: CanvasRenderingContext2D, v: View, ship: Ship, selected: boolean, now: number) {
+  if (!ship.target) return;
+  const a = toScreen(v, ship.pos);
+  const b = toScreen(v, ship.target);
+  ctx.setLineDash([3, 6]);
+  ctx.lineDashOffset = -now / 60;
+  ctx.strokeStyle = selected ? 'rgba(255,255,255,0.55)' : SHIP_COLORS[ship.type] + '40';
+  ctx.lineWidth = 1.2;
   ctx.beginPath();
-  const a = hexScreen(v, from);
   ctx.moveTo(a.x, a.y);
-  for (const h of hexLine(from, ui.hoverHex)) {
-    const p = hexScreen(v, h);
-    ctx.lineTo(p.x, p.y);
-  }
+  ctx.lineTo(b.x, b.y);
   ctx.stroke();
   ctx.setLineDash([]);
-  const end = hexScreen(v, ui.hoverHex);
-  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineDashOffset = 0;
+  if (selected) {
+    const r = Math.max(5, v.size * 0.15);
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath();
+    ctx.moveTo(b.x - r, b.y);
+    ctx.lineTo(b.x + r, b.y);
+    ctx.moveTo(b.x, b.y - r);
+    ctx.lineTo(b.x, b.y + r);
+    ctx.stroke();
+  }
+}
+
+/** Dashed line from the selected ship to the mouse: where it would fly on click. */
+function drawAim(ctx: CanvasRenderingContext2D, v: View, ui: UIState, ship: Ship | undefined) {
+  if (!ship || !ui.hoverPoint) return;
+  const a = toScreen(v, ship.pos);
+  const b = toScreen(v, ui.hoverPoint);
+  ctx.setLineDash([4, 6]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.arc(end.x, end.y, v.size * 0.2, 0, Math.PI * 2);
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, Math.max(4, v.size * 0.12), 0, Math.PI * 2);
   ctx.stroke();
 }
 
-function drawShipAt(ctx: CanvasRenderingContext2D, s: GameState, v: View, ship: Ship, vis: Visual, r: number, selected: boolean, now: number, showBars: boolean) {
-  const p = toScreen(v, vis);
-  drawTrail(ctx, v, vis, SHIP_COLORS[ship.type], Math.max(1.5, r * 0.35));
+function drawShip(ctx: CanvasRenderingContext2D, s: GameState, v: View, key: string, ship: Ship, r: number, selected: boolean, now: number) {
+  const p = toScreen(v, ship.pos);
+  const moving = !!ship.target;
+  drawTrail(ctx, v, trailFor(key, ship.pos, moving, now), ship.pos, SHIP_COLORS[ship.type], Math.max(1.5, r * 0.35));
   if (selected) {
     ctx.strokeStyle = C.sel;
     ctx.lineWidth = 1.5;
@@ -215,26 +214,33 @@ function drawShipAt(ctx: CanvasRenderingContext2D, s: GameState, v: View, ship: 
     ctx.stroke();
     ctx.setLineDash([]);
   }
-  drawShipSprite(ctx, ship.type, p.x, p.y, vis.a, r, vis.thrust, now);
+  drawShipSprite(ctx, ship.type, p.x, p.y, ship.heading, r, moving ? 1 : 0, now);
   const st = shipStats(s, ship.type);
-  if (showBars || selected || ship.hull < st.hull - 1 || ship.shield < st.shield - 1) {
+  if (selected || ship.hull < st.hull - 1 || ship.shield < st.shield - 1) {
     bar(ctx, p.x, p.y + r * 1.3, r * 2.6, ship.hull / st.hull, C.hull);
     if (st.shield > 0) bar(ctx, p.x, p.y + r * 1.3 + 4, r * 2.6, ship.shield / st.shield, C.shield);
   }
   return p;
 }
 
+function setupView(w: number, h: number, radius: number, cam: Camera) {
+  const v0 = computeView(w, h, radius, cam);
+  const mapRadiusPx = v0.base * (radius + 1) * 1.8;
+  clampCamera(cam, mapRadiusPx);
+  return { v: computeView(w, h, radius, cam), mapRadiusPx };
+}
+
+const onScreen = (p: { x: number; y: number }, w: number, h: number, m: number) => p.x > -m && p.y > -m && p.x < w + m && p.y < h + m;
+
 // ---- home sector ------------------------------------------------------------------
 
-export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number, dt: number): DrawResult {
+export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number): DrawResult {
   const cam = ui.cams.home;
-  const v0 = computeView(w, h, CONFIG.sector.radius, cam);
-  const mapRadiusPx = v0.base * (CONFIG.sector.radius + 1) * 1.6;
-  clampCamera(cam, mapRadiusPx);
-  const v = computeView(w, h, CONFIG.sector.radius, cam);
+  const { v, mapRadiusPx } = setupView(w, h, CONFIG.sector.radius, cam);
   const z = v.size;
   drawBackground(ctx, w, h, cam.x, cam.y, 'home', '#060a15');
-  drawGrid(ctx, v, ui);
+  drawGrid(ctx, v, w, h);
+  drawBorder(ctx, v, 'rgba(95,212,255,0.25)');
   const ships = s.ships.filter((x) => x.location === 'home');
 
   // shuttle routes
@@ -244,9 +250,9 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
     const a = nodeById(s, sh.shuttle.a);
     const b = nodeById(s, sh.shuttle.b);
     if (!a || !b) continue;
-    const pa = hexScreen(v, a.hex);
-    const pb = hexScreen(v, b.hex);
-    ctx.strokeStyle = SHIP_COLORS[sh.type] + '55';
+    const pa = toScreen(v, center(a.hex));
+    const pb = toScreen(v, center(b.hex));
+    ctx.strokeStyle = SHIP_COLORS[sh.type] + '50';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
@@ -257,13 +263,16 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
 
   // nodes
   for (const n of s.nodes) {
-    const p = hexScreen(v, n.hex);
-    if (p.x < -z * 2 || p.y < -z * 2 || p.x > w + z * 2 || p.y > h + z * 2) continue;
+    const p = toScreen(v, center(n.hex));
+    if (!onScreen(p, w, h, z * 2)) continue;
     if (ui.selNode === n.id) {
-      hexPath(ctx, p.x, p.y, z * 0.98);
       ctx.strokeStyle = C.sel;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, z * 0.78, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.setLineDash([]);
     }
     if (n.kind === 'base') drawBase(ctx, p.x, p.y, z * 0.5, now);
     else if (n.kind === 'planet') {
@@ -283,119 +292,101 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
     else if (n.kind === 'asteroid') drawAsteroids(ctx, p.x, p.y, z * 0.5, now, hashId(n.id), n.ore / CONFIG.asteroid.oreMax);
   }
 
-  // mining beams: a miner sitting on a belt with room in its hold
+  // mining beams: a miner parked at a belt with room in its hold
   for (const sh of ships) {
-    if (sh.type !== 'miner' || sh.path.length) continue;
-    const n = nodeAt(s, sh.hex);
+    if (sh.type !== 'miner' || sh.target) continue;
+    const n = nodeNear(s, sh.pos);
     if (n?.kind !== 'asteroid' || n.ore < 1 || sh.cargo >= shipStats(s, 'miner').cargoHome - 1e-6) continue;
-    const vis = visuals.get(`h:${sh.id}`);
-    if (!vis) continue;
-    const a = toScreen(v, vis);
-    const b = hexScreen(v, n.hex);
+    const a = toScreen(v, sh.pos);
+    const b = toScreen(v, center(n.hex));
     drawBeam(ctx, a.x, a.y, b.x, b.y, C.ore, Math.max(1, z * 0.04), now);
   }
 
-  drawPreview(ctx, v, ui, ships.find((x) => x.id === ui.selShip));
+  const selected = ships.find((x) => x.id === ui.selShip);
+  for (const sh of ships) drawCourse(ctx, v, sh, sh === selected, now);
+  drawAim(ctx, v, ui, selected);
   const shipPos = new Map<string, { x: number; y: number }>();
   const r = Math.max(5, z * 0.17);
-  for (const sh of ships) {
-    const vis = animate(`h:${sh.id}`, sh, now, dt, 0.42, 0.35);
-    shipPos.set(sh.id, drawShipAt(ctx, s, v, sh, vis, r, ui.selShip === sh.id, now, false));
-  }
+  for (const sh of ships) shipPos.set(sh.id, drawShip(ctx, s, v, `h:${sh.id}`, sh, r, sh === selected, now));
 
-  if (z > 20) {
+  if (z > 18) {
     for (const n of s.nodes) {
-      const p = hexScreen(v, n.hex);
+      const p = toScreen(v, center(n.hex));
+      if (!onScreen(p, w, h, 60)) continue;
       label(ctx, n.name, p.x, p.y + z * 0.62, ui.selNode === n.id ? C.text : C.dim, Math.max(10, Math.min(13, z * 0.22)));
     }
   }
-  pruneVisuals(now);
+  pruneTrails(now);
   return { view: v, shipPos, mapRadiusPx };
 }
 
 // ---- expedition ------------------------------------------------------------------
 
-function nearestOf<T extends { hex: Hex }>(list: T[], from: Hex, range: number): T | undefined {
-  let best: T | undefined;
-  let bestD = Infinity;
-  for (const x of list) {
-    const d = hexDistance(x.hex, from);
-    if (d <= range && d < bestD) {
-      best = x;
-      bestD = d;
-    }
-  }
-  return best;
-}
-
-export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number, dt: number): DrawResult {
+export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number): DrawResult {
   const ex = s.expedition!;
   const cam = ui.cams.expedition;
-  const v0 = computeView(w, h, CONFIG.expedition.radius, cam);
-  const mapRadiusPx = v0.base * (CONFIG.expedition.radius + 1) * 1.6;
-  clampCamera(cam, mapRadiusPx);
-  const v = computeView(w, h, CONFIG.expedition.radius, cam);
+  const { v, mapRadiusPx } = setupView(w, h, CONFIG.expedition.radius, cam);
   const z = v.size;
   drawBackground(ctx, w, h, cam.x, cam.y, 'anomaly', '#0b0614');
-  drawGrid(ctx, v, ui);
+  drawGrid(ctx, v, w, h);
+  drawBorder(ctx, v, 'rgba(255,93,108,0.3)');
 
-  const g = hexScreen(v, GATE);
+  const g = toScreen(v, GATE_POS);
   drawGate(ctx, g.x, g.y, z * 0.55, now);
 
   ex.deposits.forEach((d, i) => {
-    const p = hexScreen(v, d.hex);
-    drawCrystals(ctx, p.x, p.y, z * 0.45, now, i * 977 + 13, d.shards > 0);
+    const p = toScreen(v, center(d.hex));
+    if (onScreen(p, w, h, z)) drawCrystals(ctx, p.x, p.y, z * 0.45, now, i * 977 + 13, d.shards > 0);
   });
 
   const ships = expeditionShips(s);
-  const shipVis = new Map<string, Visual>();
-  for (const sh of ships) shipVis.set(sh.id, animate(`x:${sh.id}`, sh, now, dt, 0.32, 0.5));
-  const enemyVis = new Map<string, Visual>();
-  for (const en of ex.enemies) enemyVis.set(en.id, animate(`e:${en.id}`, en, now, dt, 0.12, 0.8));
 
-  // beams: wardens fire at the nearest enemy in range, enemies at the nearest ship when adjacent,
-  // miners draw shards from the deposit under them
+  // beams: wardens fire at the nearest enemy in range, enemies at the nearest ship in range,
+  // miners draw shards from the deposit they are parked at
   for (const sh of ships) {
-    const sv = toScreen(v, shipVis.get(sh.id)!);
+    const sv = toScreen(v, sh.pos);
     if (sh.type === 'warden') {
-      const target = nearestOf(ex.enemies, sh.hex, 1);
+      const target = nearest(ex.enemies, sh.pos, CONFIG.ranges.weapon);
       if (target) {
-        const tv = toScreen(v, enemyVis.get(target.id)!);
+        const tv = toScreen(v, target.pos);
         drawBeam(ctx, sv.x, sv.y, tv.x, tv.y, '#8fd0ff', Math.max(1.5, z * 0.05), now);
       }
     }
-    if (sh.type === 'miner' && !sh.path.length) {
-      const dep = ex.deposits.find((d) => hexEq(d.hex, sh.hex) && d.shards > 0);
+    if (sh.type === 'miner' && !sh.target) {
+      const dep = depositNear(ex, sh.pos);
       if (dep && sh.shards < shipStats(s, 'miner').cargoExp - 1e-6) {
-        const dp = hexScreen(v, dep.hex);
+        const dp = toScreen(v, center(dep.hex));
         drawBeam(ctx, sv.x, sv.y, dp.x, dp.y, C.shard, Math.max(1, z * 0.04), now);
       }
     }
   }
   for (const en of ex.enemies) {
-    if (en.path.length) continue;
-    const target = nearestOf(ships, en.hex, 1);
-    if (!target) continue;
-    const a = toScreen(v, enemyVis.get(en.id)!);
-    const b = toScreen(v, shipVis.get(target.id)!);
+    if (en.target) continue;
+    const target = enemyTarget(en.pos, ships, ships.filter((x) => x.type === 'warden'));
+    if (!target || dist(target.pos, en.pos) > CONFIG.ranges.enemyAttack) continue;
+    const a = toScreen(v, en.pos);
+    const b = toScreen(v, target.pos);
     drawBeam(ctx, a.x, a.y, b.x, b.y, C.enemy, Math.max(1, z * 0.035), now);
   }
 
-  for (const en of ex.enemies) drawEnemy(ctx, v, en, enemyVis.get(en.id)!, now);
+  for (const en of ex.enemies) drawEnemy(ctx, v, en, now);
 
-  drawPreview(ctx, v, ui, ships.find((x) => x.id === ui.selShip));
+  const selected = ships.find((x) => x.id === ui.selShip);
+  for (const sh of ships) drawCourse(ctx, v, sh, sh === selected, now);
+  drawAim(ctx, v, ui, selected);
   const shipPos = new Map<string, { x: number; y: number }>();
   const r = Math.max(6, z * 0.19);
   for (const sh of ships) {
-    const p = drawShipAt(ctx, s, v, sh, shipVis.get(sh.id)!, r, ui.selShip === sh.id, now, false);
+    const p = drawShip(ctx, s, v, `x:${sh.id}`, sh, r, sh === selected, now);
     shipPos.set(sh.id, p);
     if (sh.shards >= 1) label(ctx, `◆ ${Math.floor(sh.shards)}`, p.x, p.y - r * 2.4, C.shard, 11);
   }
 
-  if (z > 20) {
+  if (z > 18) {
     label(ctx, 'Sprungtor', g.x, g.y + z * 0.62, '#5fd4ff', 11);
     for (const d of ex.deposits) {
-      const p = hexScreen(v, d.hex);
+      const p = toScreen(v, center(d.hex));
+      if (!onScreen(p, w, h, 60)) continue;
       label(ctx, d.shards > 0 ? `${Math.floor(d.shards)}` : 'leer', p.x, p.y + z * 0.55, d.shards > 0 ? C.shard : C.dim, 11);
     }
   }
@@ -410,14 +401,14 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, w, h);
   }
-  pruneVisuals(now);
+  pruneTrails(now);
   return { view: v, shipPos, mapRadiusPx };
 }
 
-function drawEnemy(ctx: CanvasRenderingContext2D, v: View, en: Enemy, vis: Visual, now: number) {
-  const p = toScreen(v, vis);
+function drawEnemy(ctx: CanvasRenderingContext2D, v: View, en: Enemy, now: number) {
+  const p = toScreen(v, en.pos);
   const r = v.size * (en.type === 'colossus' ? 0.3 : 0.17);
-  drawTrail(ctx, v, vis, '#ff5d6c', Math.max(1, r * 0.3));
+  drawTrail(ctx, v, trailFor(`e:${en.id}`, en.pos, !!en.target, now), en.pos, '#ff5d6c', Math.max(1, r * 0.3));
   drawEnemySprite(ctx, en.type, p.x, p.y, r, now, hashId(en.id) % 7);
   bar(ctx, p.x, p.y + r + 4, r * 2.4, en.hp / en.maxHp, C.enemy);
 }

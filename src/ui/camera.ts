@@ -6,10 +6,11 @@ export interface Camera {
   zoom: number;
 }
 
-export const MIN_ZOOM = 0.7;
-export const MAX_ZOOM = 4;
+export const MIN_ZOOM = 0.8;
+export const MAX_ZOOM = 8;
 
-export const newCamera = (): Camera => ({ x: 0, y: 0, zoom: 1 });
+export const DEFAULT_ZOOM = 1.8;
+export const newCamera = (zoom = DEFAULT_ZOOM): Camera => ({ x: 0, y: 0, zoom });
 
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
@@ -34,5 +35,5 @@ export function zoomAt(cam: Camera, factor: number, px: number, py: number, w: n
 export function resetCamera(cam: Camera): void {
   cam.x = 0;
   cam.y = 0;
-  cam.zoom = 1;
+  cam.zoom = DEFAULT_ZOOM;
 }

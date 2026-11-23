@@ -1,14 +1,14 @@
 import './style.css';
 import * as A from './game/actions';
 import { CONFIG } from './game/config';
-import { hexDistance, pixelToHex } from './game/hex';
+import { insideMap } from './game/geom';
 import { load, save, step } from './game/sim';
-import { newGame, nodeAt, shipById } from './game/state';
-import type { GameState, Hex, ModuleId, ShipType } from './game/types';
+import { newGame, nodeNear, shipById } from './game/state';
+import type { GameState, ModuleId, ShipType, Vec } from './game/types';
 import { fmtTime } from './ui/format';
 import { panel, tabs, topbar } from './ui/panel';
 import { resetCamera, zoomAt } from './ui/camera';
-import { drawExpedition, drawHome, type DrawResult } from './ui/render';
+import { drawExpedition, drawHome, toWorld, type DrawResult } from './ui/render';
 import { initialUI, type Tab } from './ui/ui-state';
 
 function storage(): Storage | null {
@@ -60,12 +60,12 @@ function run(r: A.Result) {
 
 // ---- input on the map ------------------------------------------------------------
 
-function hexAt(clientX: number, clientY: number): Hex | null {
+/** World position under a screen point, or null outside the map. */
+function pointAt(clientX: number, clientY: number): Vec | null {
   if (!lastDraw) return null;
   const r = canvas.getBoundingClientRect();
-  const v = lastDraw.view;
-  const h = pixelToHex(clientX - r.left - v.cx, clientY - r.top - v.cy, v.size);
-  return hexDistance(h, { q: 0, r: 0 }) <= v.radius ? h : null;
+  const p = toWorld(lastDraw.view, clientX - r.left, clientY - r.top);
+  return insideMap(p, lastDraw.view.radius) ? p : null;
 }
 
 function shipAt(clientX: number, clientY: number): string | null {
@@ -100,13 +100,13 @@ function handleTap(clientX: number, clientY: number) {
   } else if (shipId && shipId === ui.selShip) {
     ui.selShip = null;
   } else {
-    const h = hexAt(clientX, clientY);
-    if (!h) return;
+    const p = pointAt(clientX, clientY);
+    if (!p) return;
     if (selectedHere) {
-      const r = A.moveShip(s, selected.id, h);
+      const r = A.moveShip(s, selected.id, p);
       if (!r.ok) toast(r.msg, false);
     } else if (ui.view === 'home') {
-      ui.selNode = nodeAt(s, h)?.id ?? null;
+      ui.selNode = nodeNear(s, p, 1)?.id ?? null;
       ui.selShip = null;
       ui.tab = 'select';
     }
@@ -131,7 +131,7 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   const prev = pointers.get(e.pointerId);
   if (!prev) {
-    ui.hoverHex = e.pointerType === 'mouse' ? hexAt(e.clientX, e.clientY) : null;
+    ui.hoverPoint = e.pointerType === 'mouse' ? pointAt(e.clientX, e.clientY) : null;
     return;
   }
   if (pointers.size === 1) {
@@ -155,7 +155,7 @@ canvas.addEventListener('pointermove', (e) => {
     if (before > 10) zoomAt(cam(), after / before, mid.x, mid.y, cssW, cssH);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   }
-  ui.hoverHex = null;
+  ui.hoverPoint = null;
 });
 
 function endPointer(e: PointerEvent, tap: boolean) {
@@ -169,7 +169,7 @@ function endPointer(e: PointerEvent, tap: boolean) {
 canvas.addEventListener('pointerup', (e) => endPointer(e, true));
 canvas.addEventListener('pointercancel', (e) => endPointer(e, false));
 canvas.addEventListener('pointerleave', (e) => {
-  if (e.pointerType === 'mouse') ui.hoverHex = null;
+  if (e.pointerType === 'mouse') ui.hoverPoint = null;
 });
 canvas.addEventListener(
   'wheel',
@@ -298,8 +298,8 @@ function frame(now: number) {
   step(s, dt * ui.speed);
   if (ui.view === 'expedition' && !s.expedition) ui.view = 'home';
   lastDraw = ui.view === 'expedition' && s.expedition
-    ? drawExpedition(ctx, s, ui, cssW, cssH, now, dt)
-    : drawHome(ctx, s, ui, cssW, cssH, now, dt);
+    ? drawExpedition(ctx, s, ui, cssW, cssH, now)
+    : drawHome(ctx, s, ui, cssW, cssH, now);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
