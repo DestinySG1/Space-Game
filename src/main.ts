@@ -132,7 +132,7 @@ document.addEventListener('click', (e) => {
   if (!el || el.tagName === 'INPUT') return;
   const arg = el.dataset.arg ?? '';
   switch (el.dataset.action) {
-    case 'tab': ui.tab = arg as Tab; break;
+    case 'tab': ui.tab = arg as Tab; ui.confirmReset = false; break;
     case 'view': ui.view = arg === 'expedition' && s.expedition ? 'expedition' : 'home'; ui.selShip = null; ui.selNode = null; if (ui.view === 'expedition') ui.tab = 'select'; break;
     case 'speed': ui.speed = Number(arg); break;
     case 'selectShip': {
@@ -168,12 +168,13 @@ document.addEventListener('click', (e) => {
     case 'jump': run(A.jump(s, arg)); ui.selShip = null; break;
     case 'jumpAll': run(A.jumpAllAtGate(s)); break;
     case 'recall': run(A.recallAllToGate(s)); break;
-    case 'reset':
-      if (confirm('Wirklich ein neues Spiel beginnen? Der aktuelle Spielstand geht verloren.')) {
-        s = newGame();
-        Object.assign(ui, initialUI());
-        save(s, storage());
-      }
+    case 'reset': ui.confirmReset = true; break;
+    case 'resetNo': ui.confirmReset = false; break;
+    case 'resetYes':
+      s = newGame();
+      Object.assign(ui, initialUI());
+      save(s, storage());
+      toast('Neues Spiel gestartet.', true);
       break;
   }
   refreshPanel(true);

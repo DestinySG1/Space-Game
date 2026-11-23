@@ -12,6 +12,7 @@ export interface UIState {
   launch: string[]; // ships picked for the next expedition
   launchTier: number;
   toast: { msg: string; ok: boolean; until: number } | null;
+  confirmReset: boolean;
 }
 
 export const initialUI = (): UIState => ({
@@ -24,4 +25,5 @@ export const initialUI = (): UIState => ({
   launch: [],
   launchTier: 1,
   toast: null,
+  confirmReset: false,
 });

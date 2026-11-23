@@ -59,7 +59,7 @@ export function panel(s: GameState, ui: UIState): string {
     case 'yard': return yardPanel(s);
     case 'research': return researchPanel(s);
     case 'expedition': return expeditionPanel(s, ui);
-    case 'log': return logPanel(s);
+    case 'log': return logPanel(s, ui);
   }
 }
 
@@ -259,8 +259,10 @@ function expeditionPanel(s: GameState, ui: UIState): string {
     </div>${last}${forge}`;
 }
 
-function logPanel(s: GameState): string {
+function logPanel(s: GameState, ui: UIState): string {
   return `<h2>Logbuch</h2>${s.log.map((e) => `<div class="log"><span class="muted small">${fmtTime(e.t)}</span> ${esc(e.msg)}</div>`).join('')}
     <h3>Spielstand</h3><p class="muted small">Wird automatisch im Browser gespeichert. Der Heimat-Sektor arbeitet offline weiter (bis 8 h), laufende Expeditionen pausieren.</p>
-    ${btn('reset', 'Neues Spiel', { kind: 'danger' })}`;
+    ${ui.confirmReset
+      ? `<div class="card"><b>Wirklich neu beginnen?</b><div class="muted small">Der aktuelle Spielstand geht verloren.</div><div class="row">${btn('resetYes', 'Ja, neues Spiel', { kind: 'danger' })} ${btn('resetNo', 'Abbrechen', { kind: 'ghost' })}</div></div>`
+      : btn('reset', 'Neues Spiel', { kind: 'danger' })}`;
 }
