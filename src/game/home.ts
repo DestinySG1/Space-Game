@@ -2,7 +2,7 @@
 import { CONFIG, MODULES } from './config';
 import { passiveIncome, shipStats, tradeValuePerUnit } from './economy';
 import { center, dist, fly, parkingSpot } from './geom';
-import { addShip, baseNode, log, nodeById, nodeNear } from './state';
+import { addShip, baseNode, exploreAt, log, nodeById, nodeNear } from './state';
 import type { GameState, ModuleId, SectorNode, Ship, Vec } from './types';
 
 export function sendTo(m: { target: Vec | null }, to: Vec): void {
@@ -41,6 +41,10 @@ function tickHomeShip(s: GameState, ship: Ship, dt: number): void {
   const speed = st.speedHome * (s.hydrogen >= 1 ? 1 : CONFIG.hydrogen.emptySpeed); // below 1 H₂ counts as empty
   const flying = fly(ship, speed, dt);
   s.hydrogen = Math.max(0, s.hydrogen - dist(from, ship.pos) * CONFIG.hydrogen.burn[ship.type]);
+  const found = exploreAt(s, ship.pos);
+  if (found) {
+    log(s, found.length ? `Erkundet: ${found.map((n) => n.name).join(', ')} entdeckt.` : 'Erkundet: leerer Raum.');
+  }
   if (flying) return;
   const here = nodeNear(s, ship.pos);
   if (!here) return;

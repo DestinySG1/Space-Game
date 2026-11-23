@@ -3,12 +3,12 @@ import { CONFIG } from '../game/config';
 import { shipStats } from '../game/economy';
 import { GATE_POS, depositNear, enemyTarget, expeditionShips, nearest } from '../game/expedition';
 import { center, dist } from '../game/geom';
-import { hexesInRadius } from '../game/hex';
+import { hexKey, hexesInRadius } from '../game/hex';
 import { nodeById, nodeNear } from '../game/state';
 import type { Enemy, GameState, Ship, Vec } from '../game/types';
 import { clampCamera, type Camera } from './camera';
 import {
-  SHIP_COLORS, drawAsteroids, drawBackground, drawBase, drawBeam, drawCrystals, drawEnemySprite, drawGasGiant, drawGate, drawPlanet,
+  SHIP_COLORS, fogTexture, drawAsteroids, drawBackground, drawBase, drawBeam, drawCrystals, drawEnemySprite, drawGasGiant, drawGate, drawPlanet,
   drawShipSprite, drawStation, hashId,
 } from './sprites';
 import type { UIState } from './ui-state';
@@ -240,6 +240,40 @@ function setupView(w: number, h: number, radius: number, cam: Camera) {
 
 const onScreen = (p: { x: number; y: number }, w: number, h: number, m: number) => p.x > -m && p.y > -m && p.x < w + m && p.y < h + m;
 
+/** Black nebula over every unexplored hex; it drifts slowly and moves with the map. */
+function drawFog(ctx: CanvasRenderingContext2D, v: View, explored: Set<string>, w: number, h: number, now: number) {
+  const hs = v.size * HEX;
+  ctx.beginPath();
+  let any = false;
+  for (const hx of hexesInRadius(v.radius)) {
+    if (explored.has(hexKey(hx))) continue;
+    const p = toScreen(v, center(hx));
+    if (p.x < -hs || p.y < -hs || p.x > w + hs || p.y > h + hs) continue;
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 180) * (60 * i - 30);
+      const px = p.x + hs * 1.01 * Math.cos(a);
+      const py = p.y + hs * 1.01 * Math.sin(a);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    any = true;
+  }
+  if (!any) return;
+  const pat = ctx.createPattern(fogTexture(), 'repeat');
+  if (pat) {
+    const k = Math.max(0.3, hs / 160);
+    pat.setTransform(new DOMMatrix().translate(v.cx + now * 0.004 * k, v.cy).scale(k));
+    ctx.fillStyle = pat;
+  } else {
+    ctx.fillStyle = '#030409';
+  }
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(110,80,180,0.18)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
 // ---- home sector ------------------------------------------------------------------
 
 export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number): DrawResult {
@@ -250,6 +284,7 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
   drawGrid(ctx, v, w, h);
   drawBorder(ctx, v, 'rgba(95,212,255,0.25)');
   const ships = s.ships.filter((x) => x.location === 'home');
+  const explored = new Set(s.explored);
 
   // shuttle routes
   ctx.setLineDash([2, 7]);
@@ -271,6 +306,7 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
 
   // nodes
   for (const n of s.nodes) {
+    if (!explored.has(hexKey(n.hex))) continue;
     const p = toScreen(v, center(n.hex));
     if (!onScreen(p, w, h, z * 3)) continue;
     if (ui.selNode === n.id) {
@@ -325,6 +361,8 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
     drawBeam(ctx, a.x, a.y, b.x, b.y, C.ore, Math.max(1, z * 0.08), now);
   }
 
+  drawFog(ctx, v, explored, w, h, now);
+
   const selected = ships.find((x) => x.id === ui.selShip);
   for (const sh of ships) drawCourse(ctx, v, sh, sh === selected, now);
   drawAim(ctx, v, ui, selected);
@@ -334,6 +372,7 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
 
   if (z * S.planet > 8) {
     for (const n of s.nodes) {
+      if (!explored.has(hexKey(n.hex))) continue;
       const p = toScreen(v, center(n.hex));
       if (!onScreen(p, w, h, 60)) continue;
       label(ctx, n.name, p.x, p.y + z * S.label, ui.selNode === n.id ? C.text : C.dim, Math.max(10, Math.min(13, z * 0.4)));

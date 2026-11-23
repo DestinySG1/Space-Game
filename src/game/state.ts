@@ -1,7 +1,7 @@
 import { CONFIG } from './config';
 import { shipStats } from './economy';
 import { center, dist, parkingSpot } from './geom';
-import { hex, hexDistance, hexesInRadius } from './hex';
+import { hex, hexDistance, hexKey, hexesInRadius, pixelToHex } from './hex';
 import { makeRng } from './rng';
 import type { GameState, Hex, LogEntry, SectorNode, Ship, ShipType, Vec } from './types';
 
@@ -23,6 +23,7 @@ export function newGame(seed = Date.now() % 1_000_000): GameState {
     shards: CONFIG.start.shards,
     hydrogen: CONFIG.start.hydrogen,
     nodes: generateSector(seed),
+    explored: hexesInRadius(CONFIG.sector.exploredRadius).map(hexKey),
     ships: [],
     modules: { cargoBay: 0, tradeLink: 0, drillHead: 0, engines: 0, armor: 0, shields: 0, cannons: 0, scanner: 0 },
     hangar: 0,
@@ -45,9 +46,16 @@ export function newGame(seed = Date.now() % 1_000_000): GameState {
 function generateSector(seed: number): SectorNode[] {
   const rng = makeRng(seed);
   const { radius, planets, stations, asteroids, gasGiants } = CONFIG.sector;
-  const free = rng.shuffle(hexesInRadius(radius).filter((h) => hexDistance(h, hex(0, 0)) >= 2));
+  const free = rng.shuffle(hexesInRadius(radius).filter((h) => hexDistance(h, hex(0, 0)) > CONFIG.sector.exploredRadius));
+  // the 6 visible hexes around the base get a guaranteed starter set, so there is something to do at once
+  const starter = rng.shuffle(hexesInRadius(1).filter((h) => hexDistance(h, hex(0, 0)) === 1));
   const taken: Hex[] = [];
-  const take = (): Hex => {
+  const take = (start = false): Hex => {
+    if (start && starter.length) {
+      const h = starter.pop()!;
+      taken.push(h);
+      return h;
+    }
     // prefer hexes not touching another node, fall back to any free hex
     const i = free.findIndex((h) => taken.every((t) => hexDistance(t, h) >= 2));
     const h = free.splice(i >= 0 ? i : 0, 1)[0];
@@ -60,21 +68,21 @@ function generateSector(seed: number): SectorNode[] {
   const pNames = rng.shuffle([...PLANET_NAMES]);
   for (let i = 0; i < planets; i++) {
     nodes.push({
-      id: `p${i}`, kind: 'planet', name: pNames[i], hex: take(),
+      id: `p${i}`, kind: 'planet', name: pNames[i], hex: take(i < 2),
       level: 0, planetType: i % 2 === 0 ? 'garden' : 'rock', stock: 0, ore: 0,
     });
   }
   for (let i = 0; i < stations; i++) {
-    nodes.push({ id: `s${i}`, kind: 'station', name: STATION_NAMES[i], hex: take(), level: 1, stock: 10, ore: 0 });
+    nodes.push({ id: `s${i}`, kind: 'station', name: STATION_NAMES[i], hex: take(i < 2), level: 1, stock: 10, ore: 0 });
   }
   for (let i = 0; i < asteroids; i++) {
     nodes.push({
-      id: `a${i}`, kind: 'asteroid', name: `Gürtel ${String.fromCharCode(65 + i)}`, hex: take(),
+      id: `a${i}`, kind: 'asteroid', name: `Gürtel ${String.fromCharCode(65 + i)}`, hex: take(i < 1),
       level: 1, stock: 0, ore: CONFIG.asteroid.oreMax,
     });
   }
   for (let i = 0; i < gasGiants; i++) {
-    nodes.push({ id: `g${i}`, kind: 'gasgiant', name: `Gasriese ${GAS_NAMES[i]}`, hex: take(), level: 0, stock: 0, ore: 0 });
+    nodes.push({ id: `g${i}`, kind: 'gasgiant', name: `Gasriese ${GAS_NAMES[i]}`, hex: take(i < 1), level: 0, stock: 0, ore: 0 });
   }
   return nodes;
 }
@@ -101,6 +109,18 @@ export function addShip(s: GameState, type: ShipType): Ship {
   ship.pos = parkingSpot(center(baseNode(s).hex), ship.id, CONFIG.ranges.park);
   s.ships.push(ship);
   return ship;
+}
+
+export const isExplored = (s: GameState, h: Hex) => s.explored.includes(hexKey(h));
+
+/** Reveal the hex a home-sector ship is in. Returns the newly found nodes, or null if it was known. */
+export function exploreAt(s: GameState, p: Vec): SectorNode[] | null {
+  const h = pixelToHex(p.x, p.y, CONFIG.hexSize);
+  if (hexDistance(h, hex(0, 0)) > CONFIG.sector.radius) return null;
+  const key = hexKey(h);
+  if (s.explored.includes(key)) return null;
+  s.explored.push(key);
+  return s.nodes.filter((n) => hexKey(n.hex) === key);
 }
 
 export const baseNode = (s: GameState) => s.nodes.find((n) => n.kind === 'base')!;

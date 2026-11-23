@@ -5,7 +5,7 @@ import type { ModuleId, ShipType } from './types';
 
 export const CONFIG = {
   saveKey: 'lumen-reach-save-v1',
-  saveVersion: 3,
+  saveVersion: 4,
   tick: 0.1, // fixed simulation step in seconds
   offlineCapSeconds: 8 * 3600,
 
@@ -17,6 +17,7 @@ export const CONFIG = {
     stations: 6,
     asteroids: 10,
     gasGiants: 4,
+    exploredRadius: 1, // the base and its 6 neighbours start visible, the rest is nebula
   },
 
   planet: {

@@ -4,10 +4,13 @@ import * as A from '../src/game/actions';
 import { colonizeCost, canAfford, passiveIncome, planetUpgradeCost, refineryCost, shipCost } from '../src/game/economy';
 import { step } from '../src/game/sim';
 import { newGame } from '../src/game/state';
-import { hexDistance } from '../src/game/hex';
+import { hexDistance, hexKey, hexesInRadius } from '../src/game/hex';
+import { CONFIG } from '../src/game/config';
 import { center } from '../src/game/geom';
 
 const s = newGame(1234);
+// the bot measures the economy, not exploration: reveal the whole sector
+s.explored = hexesInRadius(CONFIG.sector.radius).map(hexKey);
 const stations = s.nodes.filter((n) => n.kind === 'station');
 // farthest pair of stations for the hauler
 let pair = [stations[0], stations[1]];

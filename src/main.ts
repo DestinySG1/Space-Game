@@ -2,8 +2,9 @@ import './style.css';
 import * as A from './game/actions';
 import { CONFIG } from './game/config';
 import { insideMap } from './game/geom';
+import { pixelToHex } from './game/hex';
 import { load, save, step } from './game/sim';
-import { newGame, nodeNear, shipById } from './game/state';
+import { isExplored, newGame, nodeNear, shipById } from './game/state';
 import type { GameState, ModuleId, ShipType, Vec } from './game/types';
 import { fmtTime } from './ui/format';
 import { panel, tabs, topbar } from './ui/panel';
@@ -106,6 +107,12 @@ function handleTap(clientX: number, clientY: number) {
       const r = A.moveShip(s, selected.id, p);
       if (!r.ok) toast(r.msg, false);
     } else if (ui.view === 'home') {
+      if (!isExplored(s, pixelToHex(p.x, p.y, CONFIG.hexSize))) {
+        toast('Unerforschter Nebel: Schicke ein Schiff hinein, um das Feld zu erkunden.', true);
+        ui.selNode = null;
+        refreshPanel(true);
+        return;
+      }
       ui.selNode = nodeNear(s, p, 1)?.id ?? null;
       ui.selShip = null;
       ui.tab = 'select';

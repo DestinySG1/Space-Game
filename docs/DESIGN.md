@@ -31,6 +31,14 @@ Zum Balancen nur dort ändern und danach `npm run balance` laufen lassen.
 Karte mit Radius 8 Feldern (4× die Fläche des ersten Prototyps) mit Heimatbasis in der Mitte,
 18 Planeten, 6 Handelsposten, 10 Asteroidengürteln und 4 Gasriesen. Die Lage wird aus einem Seed erzeugt.
 
+**Erkundung:** Zu Beginn sind nur die Heimatbasis und ihre 6 Nachbarfelder sichtbar. In diesen inneren
+Feldern liegen garantiert ein Garten- und ein Felsplanet, zwei Handelsposten, ein Asteroidengürtel und ein
+Gasriese. Alles andere liegt unter schwarzem Nebel: Objekte darin sind unsichtbar, lassen sich nicht
+kolonisieren und nicht als Pendelziel wählen. Ein Feld wird erforscht, sobald ein Schiff hineinfliegt
+(das kostet Wasserstoff). Da die Startposten nah beieinander liegen, lohnt sich das Erkunden auch für
+den Handel: weiter entfernte Posten bringen mehr Credits pro Ware. Die Anomalie der Expeditionen ist
+nicht vernebelt.
+
 **Freie Bewegung:** Schiffe fliegen auf direktem Weg an jeden Punkt der Karte und bleiben dort stehen.
 Das Hex-Raster dient nur zur Orientierung und zum Platzieren von Planeten, Posten und Gürteln.
 Ein Feld hat einen Radius von 6 Einheiten (benachbarte Feldmitten liegen ≈ 10,4 auseinander), Planeten
@@ -132,7 +140,7 @@ Ausbeute steigt aber mit jeder Minute.
 | T3, 2 Wächter, Forschung 2 | sicher, ca. 88 Splitter |
 | T5, 2 Wächter, Forschung 3 | sicher bei Rückkehr nach 12,5 min, ca. 104 Splitter |
 
-Der Heimat-Bot erreicht die erste Expedition nach etwa 9 Minuten Spielzeit.
+Der Heimat-Bot (mit aufgedeckter Karte) erreicht die erste Expedition nach etwa 7 Minuten Spielzeit.
 
 ## Nächste Ausbaustufen (Ideen)
 

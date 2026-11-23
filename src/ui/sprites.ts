@@ -613,3 +613,44 @@ export function drawGasGiant(ctx: Ctx, x: number, y: number, r: number, t: numbe
     ctx.fill();
   }
 }
+
+// ---- Fog of war --------------------------------------------------------------------
+
+let fogTex: HTMLCanvasElement | null = null;
+
+/** Tileable dark nebula texture for unexplored space. */
+export function fogTexture(): HTMLCanvasElement {
+  if (fogTex) return fogTex;
+  const size = 512;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#030409';
+  g.fillRect(0, 0, size, size);
+  const rng = makeRng(4242);
+  const tints = ['40,24,70', '18,26,60', '30,14,44', '10,12,24'];
+  for (let i = 0; i < 70; i++) {
+    const x = rng.next() * size;
+    const y = rng.next() * size;
+    const r = 30 + rng.next() * 110;
+    const col = tints[i % tints.length];
+    const a = 0.12 + rng.next() * 0.25;
+    // draw each blob 9 times so the texture tiles without seams
+    for (const ox of [-size, 0, size]) {
+      for (const oy of [-size, 0, size]) {
+        const grad = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+        grad.addColorStop(0, `rgba(${col},${a})`);
+        grad.addColorStop(1, `rgba(${col},0)`);
+        g.fillStyle = grad;
+        g.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+      }
+    }
+  }
+  for (let i = 0; i < 120; i++) {
+    g.fillStyle = `rgba(150,140,200,${0.05 + rng.next() * 0.12})`;
+    g.fillRect(rng.next() * size, rng.next() * size, 1, 1);
+  }
+  fogTex = c;
+  return c;
+}

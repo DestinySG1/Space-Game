@@ -7,7 +7,7 @@ import {
 import { GATE_POS, canJump, createExpedition, expeditionShips, gateSpot, jumpHome } from './expedition';
 import { dist, insideMap } from './geom';
 import { dockAt, sendTo } from './home';
-import { log, nodeById, nodeNear, shipById } from './state';
+import { isExplored, log, nodeById, nodeNear, shipById } from './state';
 import type { GameState, ModuleId, ShipType, Vec } from './types';
 
 export interface Result {
@@ -21,6 +21,7 @@ const notEnough = 'Nicht genug Ressourcen.';
 export function colonize(s: GameState, nodeId: string): Result {
   const n = nodeById(s, nodeId);
   if (!n || n.kind !== 'planet' || n.level > 0) return fail('Hier kann nicht kolonisiert werden.');
+  if (!isExplored(s, n.hex)) return fail('Dieses Gebiet ist noch nicht erforscht.');
   const c = colonizeCost(s);
   if (!canAfford(s, c)) return fail(notEnough);
   pay(s, c);
@@ -43,6 +44,7 @@ export function upgradePlanet(s: GameState, nodeId: string): Result {
 export function buildRefinery(s: GameState, nodeId: string): Result {
   const n = nodeById(s, nodeId);
   if (!n || n.kind !== 'gasgiant' || n.level > 0) return fail('Hier kann keine Raffinerie gebaut werden.');
+  if (!isExplored(s, n.hex)) return fail('Dieses Gebiet ist noch nicht erforscht.');
   const c = refineryCost(s);
   if (!canAfford(s, c)) return fail(notEnough);
   pay(s, c);
@@ -120,11 +122,11 @@ export function shuttleTargets(s: GameState, shipId: string): string[] {
   const here = nodeNear(s, ship.pos);
   if (!here) return [];
   if (ship.type === 'hauler' && here.kind === 'station') {
-    return s.nodes.filter((n) => n.kind === 'station' && n.id !== here.id).map((n) => n.id);
+    return s.nodes.filter((n) => n.kind === 'station' && n.id !== here.id && isExplored(s, n.hex)).map((n) => n.id);
   }
   if (ship.type === 'miner' && here.kind === 'asteroid') return ['base'];
   if (ship.type === 'miner' && here.kind === 'base') {
-    return s.nodes.filter((n) => n.kind === 'asteroid').map((n) => n.id);
+    return s.nodes.filter((n) => n.kind === 'asteroid' && isExplored(s, n.hex)).map((n) => n.id);
   }
   return [];
 }

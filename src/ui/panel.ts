@@ -81,9 +81,11 @@ function selectionPanel(s: GameState, ui: UIState): string {
       <li><b>Planeten</b> kolonisieren: liefern dauerhaft Credits oder Erz.</li>
       <li><b>Frachter</b> zwischen zwei <b>Handelsposten</b> pendeln lassen: je weiter, desto mehr Credits.</li>
       <li><b>Schürfer</b> zwischen <b>Gürtel</b> und <b>Heimatbasis</b> pendeln lassen: bringt Erz.</li>
+      <li>Der <b>schwarze Nebel</b> ist unerforscht: Schicke ein Schiff hinein, um zu sehen, was dort liegt.</li>
       <li>Fliegen kostet <b>Wasserstoff</b>. An <b>Gasriesen</b> Raffinerien bauen, sonst kriechen die Schiffe mit leerem Tank.</li>
       <li>Mit Erz und Credits einen <b>Sprungkern</b> schmieden und eine <b>Expedition</b> starten.</li>
     </ul>
+    <div class="card">Erforscht: <b>${s.explored.length}</b> von ${3 * CONFIG.sector.radius * (CONFIG.sector.radius + 1) + 1} Feldern</div>
     ${incomeSummary(s)}`;
 }
 

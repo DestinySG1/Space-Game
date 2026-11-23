@@ -109,6 +109,7 @@ export interface GameState {
   shards: number;
   hydrogen: number; // fuel: ships burn it while flying at home, expeditions need it to jump
   nodes: SectorNode[];
+  explored: string[]; // hex keys "q,r" of the home sector that are no longer hidden in the nebula
   ships: Ship[];
   modules: Record<ModuleId, number>;
   hangar: number;

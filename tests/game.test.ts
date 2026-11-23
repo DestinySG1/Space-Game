@@ -6,7 +6,7 @@ import { GATE_POS, canJump, expeditionShips } from '../src/game/expedition';
 import { center, dist } from '../src/game/geom';
 import { hex, hexDistance, hexLine, hexesInRadius, pixelToHex, hexToPixel } from '../src/game/hex';
 import { load, save, simulateOffline, step } from '../src/game/sim';
-import { addShip, newGame } from '../src/game/state';
+import { addShip, isExplored, newGame } from '../src/game/state';
 
 const stations = (s: ReturnType<typeof newGame>) => s.nodes.filter((n) => n.kind === 'station');
 
@@ -92,6 +92,38 @@ describe('home economy', () => {
     expect(A.buildShip(s, 'hauler').ok).toBe(false);
     expect(A.upgradeHangar(s).ok).toBe(true);
     expect(A.buildShip(s, 'hauler').ok).toBe(true);
+  });
+});
+
+describe('exploration', () => {
+  it('starts with the base and its 6 neighbours visible and a starter set inside', () => {
+    const s = newGame(40);
+    expect(s.explored).toHaveLength(7);
+    const inner = s.nodes.filter((n) => isExplored(s, n.hex) && n.kind !== 'base');
+    const kinds = inner.map((n) => n.kind).sort();
+    expect(kinds).toEqual(['asteroid', 'gasgiant', 'planet', 'planet', 'station', 'station']);
+  });
+
+  it('a ship flying into the nebula reveals the hex and what is in it', () => {
+    const s = newGame(41);
+    const hidden = s.nodes.find((n) => !isExplored(s, n.hex))!;
+    s.credits = 1e6;
+    expect(A.colonize(s, hidden.id).ok).toBe(false); // hidden in the nebula
+    const ship = s.ships[0];
+    A.moveShip(s, ship.id, center(hidden.hex));
+    step(s, 300);
+    expect(isExplored(s, hidden.hex)).toBe(true);
+    expect(s.log.some((l) => l.msg.includes(hidden.name))).toBe(true);
+  });
+
+  it('only offers explored destinations for shuttle routes', () => {
+    const s = newGame(42);
+    const hauler = s.ships.find((x) => x.type === 'hauler')!;
+    const st = s.nodes.find((n) => n.kind === 'station' && isExplored(s, n.hex))!;
+    hauler.pos = center(st.hex);
+    const targets = A.shuttleTargets(s, hauler.id);
+    expect(targets.length).toBeGreaterThan(0);
+    for (const id of targets) expect(isExplored(s, s.nodes.find((n) => n.id === id)!.hex)).toBe(true);
   });
 });
 
