@@ -31,9 +31,11 @@ Karte mit Radius 8 Feldern (4× die Fläche des ersten Prototyps) mit Heimatbasi
 
 **Freie Bewegung:** Schiffe fliegen auf direktem Weg an jeden Punkt der Karte und bleiben dort stehen.
 Das Hex-Raster dient nur zur Orientierung und zum Platzieren von Planeten, Posten und Gürteln.
-Ein Schiff gilt als „an“ einem Objekt, wenn es höchstens 0,8 Einheiten entfernt ist (1 Einheit =
-Radius eines Felds, benachbarte Feldmitten liegen √3 ≈ 1,73 auseinander). Schiffe parken jeweils auf
-einem eigenen Platz rund um ein Objekt.
+Ein Feld hat einen Radius von 6 Einheiten (benachbarte Feldmitten liegen ≈ 10,4 auseinander), Planeten
+nur 0,8 und Schiffe etwa 0,45. Innerhalb eines Felds ist also viel Platz zum Manövrieren. Ein Schiff
+gilt als „an“ einem Objekt, wenn es höchstens 1,8 Einheiten entfernt ist. Schiffe parken jeweils auf
+einem eigenen Platz rund um ein Objekt. Fluggeschwindigkeit: 2 Einheiten/s im Heimat-Sektor,
+3 Einheiten/s in Expeditionen (mal Schiffsfaktor).
 
 | Element | Funktion | Formel |
 |---|---|---|
@@ -93,9 +95,9 @@ Splitter `0` für Stufe 1, danach `6 × 1,9^(L−1)`, Dauer `30 × 1,7^L` s.
    - Splitterling (220 HP, 10 Schaden/s, schnell); ab Welle 10 in ungeraden Wellen ein Koloss
      (1200 HP, 30 Schaden/s, langsam).
    - Eine Welle kommt gemeinsam von einer Seite. Gegner fliegen frei auf das nächste Schiff zu und
-     feuern ab 1,5 Einheiten Abstand. **Wächter ziehen das Feuer auf sich**, wenn sie höchstens
-     2,5 Einheiten weiter weg sind als das nächste Schiff. Wächter feuern bis 2,0 Einheiten.
-5. Schürfer bauen an Vorkommen ab, ein Frachter in höchstens 1,0 Einheiten Abstand übernimmt die
+     feuern ab 3 Einheiten Abstand. **Wächter ziehen das Feuer auf sich**, wenn sie höchstens
+     5 Einheiten weiter weg sind als das nächste Schiff. Wächter feuern bis 4 Einheiten.
+5. Schürfer bauen an Vorkommen ab, ein Frachter in höchstens 2,5 Einheiten Abstand übernimmt die
    Splitter automatisch.
 6. **Heimsprung** nur vom Sprungtor. Mitgebrachte Splitter werden gutgeschrieben.
 7. Nach 15 Minuten kollabiert die Anomalie: Alle Schiffe, die noch drin sind, gehen **mit Ladung**

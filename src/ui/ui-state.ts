@@ -28,5 +28,5 @@ export const initialUI = (): UIState => ({
   launchTier: 1,
   toast: null,
   confirmReset: false,
-  cams: { home: newCamera(1.8), expedition: newCamera(1.6) },
+  cams: { home: newCamera(6), expedition: newCamera(5) },
 });

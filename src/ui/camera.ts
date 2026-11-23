@@ -7,9 +7,9 @@ export interface Camera {
 }
 
 export const MIN_ZOOM = 0.8;
-export const MAX_ZOOM = 8;
+export const MAX_ZOOM = 30;
 
-export const DEFAULT_ZOOM = 1.8;
+export const DEFAULT_ZOOM = 6;
 export const newCamera = (zoom = DEFAULT_ZOOM): Camera => ({ x: 0, y: 0, zoom });
 
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));

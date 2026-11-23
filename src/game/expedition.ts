@@ -200,7 +200,7 @@ function removeShip(s: GameState, ship: Ship): void {
 }
 
 /** Each ship's own spot next to the gate. */
-export const gateSpot = (ship: Ship) => parkingSpot(GATE_POS, ship.id, 0.45);
+export const gateSpot = (ship: Ship) => parkingSpot(GATE_POS, ship.id, CONFIG.ranges.park);
 
 export function canJump(ship: Ship): boolean {
   return ship.location === 'expedition' && !ship.target && dist(ship.pos, GATE_POS) <= CONFIG.ranges.gate;

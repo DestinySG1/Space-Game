@@ -13,6 +13,13 @@ import {
 } from './sprites';
 import type { UIState } from './ui-state';
 
+/** World units per hex radius, and object sizes in world units. */
+const HEX = CONFIG.hexSize;
+const S = {
+  planet: 0.8, base: 1.0, station: 0.85, belt: 1.1, ring: 1.5, label: 1.3,
+  ship: 0.45, skirmisher: 0.4, colossus: 0.7, crystals: 0.9, gate: 1.2,
+};
+
 const C = {
   grid: 'rgba(120,150,220,0.08)',
   sel: '#ffffff',
@@ -39,7 +46,7 @@ export interface DrawResult {
 }
 
 export function computeView(w: number, h: number, radius: number, cam: Camera): View & { base: number } {
-  const base = Math.min(w / (Math.sqrt(3) * (2 * radius + 1)), h / (3 * radius + 2)) * 0.96;
+  const base = (Math.min(w / (Math.sqrt(3) * (2 * radius + 1)), h / (3 * radius + 2)) * 0.96) / HEX;
   return { cx: w / 2 + cam.x, cy: h / 2 + cam.y, size: base * cam.zoom, radius, base };
 }
 
@@ -88,14 +95,15 @@ function hexPath(ctx: CanvasRenderingContext2D, x: number, y: number, size: numb
 
 /** Faint hex grid as a sense of scale; fades out when zoomed far out. */
 function drawGrid(ctx: CanvasRenderingContext2D, v: View, w: number, h: number) {
-  if (v.size < 7) return;
+  const hs = v.size * HEX; // hex radius on screen
+  if (hs < 7) return;
   ctx.lineWidth = 1;
   ctx.strokeStyle = C.grid;
-  ctx.globalAlpha = Math.min(1, (v.size - 7) / 15);
+  ctx.globalAlpha = Math.min(1, (hs - 7) / 15);
   for (const hx of hexesInRadius(v.radius)) {
     const p = toScreen(v, center(hx));
-    if (p.x < -v.size || p.y < -v.size || p.x > w + v.size || p.y > h + v.size) continue;
-    hexPath(ctx, p.x, p.y, v.size * 0.98);
+    if (p.x < -hs || p.y < -hs || p.x > w + hs || p.y > h + hs) continue;
+    hexPath(ctx, p.x, p.y, hs * 0.98);
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
@@ -103,7 +111,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, v: View, w: number, h: number) 
 
 /** Outline of the map so the edge of the sector is visible. */
 function drawBorder(ctx: CanvasRenderingContext2D, v: View, color: string) {
-  const R = v.radius + 0.5;
+  const R = (v.radius + 0.5) * HEX;
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 8]);
@@ -172,7 +180,7 @@ function drawCourse(ctx: CanvasRenderingContext2D, v: View, ship: Ship, selected
   ctx.setLineDash([]);
   ctx.lineDashOffset = 0;
   if (selected) {
-    const r = Math.max(5, v.size * 0.15);
+    const r = Math.max(5, v.size * 0.35);
     ctx.strokeStyle = 'rgba(255,255,255,0.7)';
     ctx.beginPath();
     ctx.moveTo(b.x - r, b.y);
@@ -197,7 +205,7 @@ function drawAim(ctx: CanvasRenderingContext2D, v: View, ui: UIState, ship: Ship
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.beginPath();
-  ctx.arc(b.x, b.y, Math.max(4, v.size * 0.12), 0, Math.PI * 2);
+  ctx.arc(b.x, b.y, Math.max(4, v.size * 0.3), 0, Math.PI * 2);
   ctx.stroke();
 }
 
@@ -225,7 +233,7 @@ function drawShip(ctx: CanvasRenderingContext2D, s: GameState, v: View, key: str
 
 function setupView(w: number, h: number, radius: number, cam: Camera) {
   const v0 = computeView(w, h, radius, cam);
-  const mapRadiusPx = v0.base * (radius + 1) * 1.8;
+  const mapRadiusPx = v0.base * HEX * (radius + 1) * 1.8;
   clampCamera(cam, mapRadiusPx);
   return { v: computeView(w, h, radius, cam), mapRadiusPx };
 }
@@ -264,32 +272,33 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
   // nodes
   for (const n of s.nodes) {
     const p = toScreen(v, center(n.hex));
-    if (!onScreen(p, w, h, z * 2)) continue;
+    if (!onScreen(p, w, h, z * 3)) continue;
     if (ui.selNode === n.id) {
       ctx.strokeStyle = C.sel;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, z * 0.78, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, Math.max(12, z * S.ring), 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    if (n.kind === 'base') drawBase(ctx, p.x, p.y, z * 0.5, now);
+    if (n.kind === 'base') drawBase(ctx, p.x, p.y, Math.max(6, z * S.base), now);
     else if (n.kind === 'planet') {
-      drawPlanet(ctx, p.x, p.y, z * 0.4, n.id, n.planetType ?? 'rock', n.level > 0);
-      if (n.level > 0) {
+      const pr = Math.max(5, z * S.planet);
+      drawPlanet(ctx, p.x, p.y, pr, n.id, n.planetType ?? 'rock', n.level > 0);
+      if (n.level > 0 && pr > 9) {
         ctx.fillStyle = 'rgba(6,10,21,0.85)';
         ctx.beginPath();
-        ctx.arc(p.x + z * 0.32, p.y - z * 0.32, Math.max(7, z * 0.14), 0, Math.PI * 2);
+        ctx.arc(p.x + pr * 0.8, p.y - pr * 0.8, Math.max(7, pr * 0.35), 0, Math.PI * 2);
         ctx.fill();
-        ctx.font = `600 ${Math.max(9, z * 0.16)}px system-ui, sans-serif`;
+        ctx.font = `600 ${Math.max(9, pr * 0.4)}px system-ui, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = n.planetType === 'garden' ? '#5fe0b0' : '#e8a95b';
-        ctx.fillText(String(n.level), p.x + z * 0.32, p.y - z * 0.31);
+        ctx.fillText(String(n.level), p.x + pr * 0.8, p.y - pr * 0.78);
       }
-    } else if (n.kind === 'station') drawStation(ctx, p.x, p.y, z * 0.42, now, n.stock / CONFIG.station.stockCap, hashId(n.id) % 10);
-    else if (n.kind === 'asteroid') drawAsteroids(ctx, p.x, p.y, z * 0.5, now, hashId(n.id), n.ore / CONFIG.asteroid.oreMax);
+    } else if (n.kind === 'station') drawStation(ctx, p.x, p.y, Math.max(6, z * S.station), now, n.stock / CONFIG.station.stockCap, hashId(n.id) % 10);
+    else if (n.kind === 'asteroid') drawAsteroids(ctx, p.x, p.y, Math.max(6, z * S.belt), now, hashId(n.id), n.ore / CONFIG.asteroid.oreMax);
   }
 
   // mining beams: a miner parked at a belt with room in its hold
@@ -299,21 +308,21 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
     if (n?.kind !== 'asteroid' || n.ore < 1 || sh.cargo >= shipStats(s, 'miner').cargoHome - 1e-6) continue;
     const a = toScreen(v, sh.pos);
     const b = toScreen(v, center(n.hex));
-    drawBeam(ctx, a.x, a.y, b.x, b.y, C.ore, Math.max(1, z * 0.04), now);
+    drawBeam(ctx, a.x, a.y, b.x, b.y, C.ore, Math.max(1, z * 0.08), now);
   }
 
   const selected = ships.find((x) => x.id === ui.selShip);
   for (const sh of ships) drawCourse(ctx, v, sh, sh === selected, now);
   drawAim(ctx, v, ui, selected);
   const shipPos = new Map<string, { x: number; y: number }>();
-  const r = Math.max(5, z * 0.17);
+  const r = Math.max(4, z * S.ship);
   for (const sh of ships) shipPos.set(sh.id, drawShip(ctx, s, v, `h:${sh.id}`, sh, r, sh === selected, now));
 
-  if (z > 18) {
+  if (z * S.planet > 8) {
     for (const n of s.nodes) {
       const p = toScreen(v, center(n.hex));
       if (!onScreen(p, w, h, 60)) continue;
-      label(ctx, n.name, p.x, p.y + z * 0.62, ui.selNode === n.id ? C.text : C.dim, Math.max(10, Math.min(13, z * 0.22)));
+      label(ctx, n.name, p.x, p.y + z * S.label, ui.selNode === n.id ? C.text : C.dim, Math.max(10, Math.min(13, z * 0.4)));
     }
   }
   pruneTrails(now);
@@ -332,11 +341,11 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
   drawBorder(ctx, v, 'rgba(255,93,108,0.3)');
 
   const g = toScreen(v, GATE_POS);
-  drawGate(ctx, g.x, g.y, z * 0.55, now);
+  drawGate(ctx, g.x, g.y, Math.max(8, z * S.gate), now);
 
   ex.deposits.forEach((d, i) => {
     const p = toScreen(v, center(d.hex));
-    if (onScreen(p, w, h, z)) drawCrystals(ctx, p.x, p.y, z * 0.45, now, i * 977 + 13, d.shards > 0);
+    if (onScreen(p, w, h, z * 2)) drawCrystals(ctx, p.x, p.y, Math.max(5, z * S.crystals), now, i * 977 + 13, d.shards > 0);
   });
 
   const ships = expeditionShips(s);
@@ -349,14 +358,14 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
       const target = nearest(ex.enemies, sh.pos, CONFIG.ranges.weapon);
       if (target) {
         const tv = toScreen(v, target.pos);
-        drawBeam(ctx, sv.x, sv.y, tv.x, tv.y, '#8fd0ff', Math.max(1.5, z * 0.05), now);
+        drawBeam(ctx, sv.x, sv.y, tv.x, tv.y, '#8fd0ff', Math.max(1.5, z * 0.1), now);
       }
     }
     if (sh.type === 'miner' && !sh.target) {
       const dep = depositNear(ex, sh.pos);
       if (dep && sh.shards < shipStats(s, 'miner').cargoExp - 1e-6) {
         const dp = toScreen(v, center(dep.hex));
-        drawBeam(ctx, sv.x, sv.y, dp.x, dp.y, C.shard, Math.max(1, z * 0.04), now);
+        drawBeam(ctx, sv.x, sv.y, dp.x, dp.y, C.shard, Math.max(1, z * 0.08), now);
       }
     }
   }
@@ -366,7 +375,7 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
     if (!target || dist(target.pos, en.pos) > CONFIG.ranges.enemyAttack) continue;
     const a = toScreen(v, en.pos);
     const b = toScreen(v, target.pos);
-    drawBeam(ctx, a.x, a.y, b.x, b.y, C.enemy, Math.max(1, z * 0.035), now);
+    drawBeam(ctx, a.x, a.y, b.x, b.y, C.enemy, Math.max(1, z * 0.07), now);
   }
 
   for (const en of ex.enemies) drawEnemy(ctx, v, en, now);
@@ -375,19 +384,19 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
   for (const sh of ships) drawCourse(ctx, v, sh, sh === selected, now);
   drawAim(ctx, v, ui, selected);
   const shipPos = new Map<string, { x: number; y: number }>();
-  const r = Math.max(6, z * 0.19);
+  const r = Math.max(5, z * S.ship * 1.1);
   for (const sh of ships) {
     const p = drawShip(ctx, s, v, `x:${sh.id}`, sh, r, sh === selected, now);
     shipPos.set(sh.id, p);
     if (sh.shards >= 1) label(ctx, `◆ ${Math.floor(sh.shards)}`, p.x, p.y - r * 2.4, C.shard, 11);
   }
 
-  if (z > 18) {
-    label(ctx, 'Sprungtor', g.x, g.y + z * 0.62, '#5fd4ff', 11);
+  if (z * S.planet > 8) {
+    label(ctx, 'Sprungtor', g.x, g.y + z * S.label, '#5fd4ff', 11);
     for (const d of ex.deposits) {
       const p = toScreen(v, center(d.hex));
       if (!onScreen(p, w, h, 60)) continue;
-      label(ctx, d.shards > 0 ? `${Math.floor(d.shards)}` : 'leer', p.x, p.y + z * 0.55, d.shards > 0 ? C.shard : C.dim, 11);
+      label(ctx, d.shards > 0 ? `${Math.floor(d.shards)}` : 'leer', p.x, p.y + z * S.label, d.shards > 0 ? C.shard : C.dim, 11);
     }
   }
 
@@ -407,7 +416,7 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
 
 function drawEnemy(ctx: CanvasRenderingContext2D, v: View, en: Enemy, now: number) {
   const p = toScreen(v, en.pos);
-  const r = v.size * (en.type === 'colossus' ? 0.3 : 0.17);
+  const r = Math.max(4, v.size * (en.type === 'colossus' ? S.colossus : S.skirmisher));
   drawTrail(ctx, v, trailFor(`e:${en.id}`, en.pos, !!en.target, now), en.pos, '#ff5d6c', Math.max(1, r * 0.3));
   drawEnemySprite(ctx, en.type, p.x, p.y, r, now, hashId(en.id) % 7);
   bar(ctx, p.x, p.y + r + 4, r * 2.4, en.hp / en.maxHp, C.enemy);

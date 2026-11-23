@@ -1,13 +1,14 @@
-// Continuous positions. World units: a hex has radius 1, neighbouring hex centres are √3 apart.
+// Continuous positions. World units: a hex has radius CONFIG.hexSize.
+import { CONFIG } from './config';
 import { hexDistance, hexToPixel, pixelToHex } from './hex';
 import type { Hex, Vec } from './types';
 
-export const center = (h: Hex): Vec => hexToPixel(h, 1);
+export const center = (h: Hex): Vec => hexToPixel(h, CONFIG.hexSize);
 export const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.y - b.y);
-export const HEX_STEP = Math.sqrt(3); // distance between neighbouring hex centres
+export const HEX_STEP = Math.sqrt(3) * CONFIG.hexSize; // distance between neighbouring hex centres
 
 export function insideMap(p: Vec, radius: number): boolean {
-  return hexDistance(pixelToHex(p.x, p.y, 1), { q: 0, r: 0 }) <= radius;
+  return hexDistance(pixelToHex(p.x, p.y, CONFIG.hexSize), { q: 0, r: 0 }) <= radius;
 }
 
 /** Pull a point back onto the map along the line to the centre. */

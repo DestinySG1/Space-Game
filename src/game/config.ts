@@ -59,16 +59,19 @@ export const CONFIG = {
     },
   } satisfies Record<ShipType, ShipConfig>,
 
-  // world units per second (neighbouring hexes are √3 ≈ 1.73 apart), multiplied by ship speed
-  speed: { home: 0.45, expedition: 0.7 },
+  // World units: one hex has radius `hexSize`, so there is room to manoeuvre inside a hex.
+  // Neighbouring hex centres are hexSize × √3 ≈ 10.4 units apart.
+  hexSize: 6,
+  // world units per second, multiplied by ship speed
+  speed: { home: 2.0, expedition: 3.0 },
   ranges: {
-    dock: 0.8, // a ship this close to a planet, station, belt or deposit counts as "there"
-    park: 0.45, // ships park on a small ring around a node so they don't overlap
-    gate: 0.9, // may jump home this close to the gate
-    weapon: 2.0, // warden fire range
-    enemyAttack: 1.5, // enemies stop and fire at this distance
-    transfer: 1.0, // miner hands shards to a hauler this close
-    taunt: 2.5, // enemies switch to a warden that is at most this much farther away than their nearest ship
+    dock: 1.8, // a ship this close to a planet, station, belt or deposit counts as "there"
+    park: 1.25, // ships park on a ring around a node so they don't overlap
+    gate: 2.0, // may jump home this close to the gate
+    weapon: 4.0, // warden fire range
+    enemyAttack: 3.0, // enemies stop and fire at this distance
+    transfer: 2.5, // miner hands shards to a hauler this close
+    taunt: 5.0, // enemies switch to a warden that is at most this much farther away than their nearest ship
   },
   shieldRegenDelay: 4,
   shieldRegenFraction: 0.05, // of max shield per second
