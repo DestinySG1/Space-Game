@@ -561,3 +561,55 @@ export function drawBeam(ctx: Ctx, x1: number, y1: number, x2: number, y2: numbe
   ctx.stroke();
   ctx.restore();
 }
+
+// ---- Gas giants ------------------------------------------------------------------
+
+/** Banded gas giant with a tilted ring; a refinery platform circles it once built. */
+export function drawGasGiant(ctx: Ctx, x: number, y: number, r: number, t: number, seed: number, refinery: boolean) {
+  const tilt = -0.35 + (seed % 7) * 0.02;
+  const ring = (front: boolean) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(tilt);
+    ctx.strokeStyle = 'rgba(180,200,255,0.55)';
+    ctx.lineWidth = Math.max(1, r * 0.12);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 1.6, r * 0.42, 0, front ? 0 : Math.PI, front ? Math.PI : Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  };
+  ring(false);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.clip();
+  const bands = ['#3b5bbf', '#6a8de8', '#2f4aa0', '#8fb2ff', '#4766c9', '#5f7fe0', '#2a3f8c'];
+  for (let i = 0; i < bands.length; i++) {
+    ctx.fillStyle = bands[(i + seed) % bands.length];
+    const by = y - r + (i * 2 * r) / bands.length;
+    ctx.beginPath();
+    ctx.ellipse(x + Math.sin(t * 0.0003 + i) * r * 0.05, by + r / bands.length, r * 1.2, r / bands.length + 1, tilt * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const shade = ctx.createLinearGradient(x - r * 0.6, y - r * 0.6, x + r, y + r);
+  shade.addColorStop(0, 'rgba(255,255,255,0.12)');
+  shade.addColorStop(0.5, 'rgba(0,0,20,0.1)');
+  shade.addColorStop(1, 'rgba(0,0,20,0.8)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.restore();
+  ring(true);
+
+  if (refinery) {
+    const a = t * 0.0005 + seed;
+    const px = x + Math.cos(a) * r * 1.35;
+    const py = y + Math.sin(a) * r * 0.5;
+    const s = Math.max(3, r * 0.22);
+    ctx.fillStyle = '#c8d6f0';
+    ctx.fillRect(px - s, py - s * 0.4, s * 2, s * 0.8);
+    ctx.fillStyle = '#4fb3ff';
+    ctx.beginPath();
+    ctx.arc(px, py, s * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}

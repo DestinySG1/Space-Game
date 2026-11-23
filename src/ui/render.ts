@@ -8,7 +8,7 @@ import { nodeById, nodeNear } from '../game/state';
 import type { Enemy, GameState, Ship, Vec } from '../game/types';
 import { clampCamera, type Camera } from './camera';
 import {
-  SHIP_COLORS, drawAsteroids, drawBackground, drawBase, drawBeam, drawCrystals, drawEnemySprite, drawGate, drawPlanet,
+  SHIP_COLORS, drawAsteroids, drawBackground, drawBase, drawBeam, drawCrystals, drawEnemySprite, drawGasGiant, drawGate, drawPlanet,
   drawShipSprite, drawStation, hashId,
 } from './sprites';
 import type { UIState } from './ui-state';
@@ -298,7 +298,21 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
         ctx.fillText(String(n.level), p.x + pr * 0.8, p.y - pr * 0.78);
       }
     } else if (n.kind === 'station') drawStation(ctx, p.x, p.y, Math.max(6, z * S.station), now, n.stock / CONFIG.station.stockCap, hashId(n.id) % 10);
-    else if (n.kind === 'asteroid') drawAsteroids(ctx, p.x, p.y, Math.max(6, z * S.belt), now, hashId(n.id), n.ore / CONFIG.asteroid.oreMax);
+    else if (n.kind === 'gasgiant') {
+      const gr = Math.max(6, z * S.planet * 1.3);
+      drawGasGiant(ctx, p.x, p.y, gr, now, hashId(n.id) % 13, n.level > 0);
+      if (n.level > 0 && gr > 9) {
+        ctx.fillStyle = 'rgba(6,10,21,0.85)';
+        ctx.beginPath();
+        ctx.arc(p.x + gr * 0.8, p.y - gr * 0.8, Math.max(7, gr * 0.3), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.font = `600 ${Math.max(9, gr * 0.32)}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#4fb3ff';
+        ctx.fillText(String(n.level), p.x + gr * 0.8, p.y - gr * 0.78);
+      }
+    } else if (n.kind === 'asteroid') drawAsteroids(ctx, p.x, p.y, Math.max(6, z * S.belt), now, hashId(n.id), n.ore / CONFIG.asteroid.oreMax);
   }
 
   // mining beams: a miner parked at a belt with room in its hold

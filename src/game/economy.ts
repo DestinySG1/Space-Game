@@ -7,18 +7,20 @@ export interface Cost {
   credits: number;
   ore: number;
   shards: number;
+  hydrogen?: number;
 }
 
 const round = (n: number) => Math.round(n);
 
 export function canAfford(s: GameState, c: Cost): boolean {
-  return s.credits >= c.credits && s.ore >= c.ore && s.shards >= c.shards;
+  return s.credits >= c.credits && s.ore >= c.ore && s.shards >= c.shards && s.hydrogen >= (c.hydrogen ?? 0);
 }
 
 export function pay(s: GameState, c: Cost): void {
   s.credits -= c.credits;
   s.ore -= c.ore;
   s.shards -= c.shards;
+  s.hydrogen -= c.hydrogen ?? 0;
 }
 
 export const bonus = (s: GameState, id: ModuleId) =>
@@ -52,17 +54,42 @@ export function planetOutput(node: SectorNode): { credits: number; ore: number }
   return { credits: base.credits * f, ore: base.ore * f };
 }
 
-/** Passive income per second from colonies (trade and mining not included). */
-export function passiveIncome(s: GameState): { credits: number; ore: number } {
+/** Passive income per second from colonies and refineries (trade and mining not included). */
+export function passiveIncome(s: GameState): { credits: number; ore: number; hydrogen: number } {
   let credits = 0;
   let ore = 0;
+  let hydrogen = CONFIG.hydrogen.baseOutput;
   for (const n of s.nodes) {
     const o = planetOutput(n);
     credits += o.credits;
     ore += o.ore;
+    hydrogen += refineryOutput(n);
   }
-  return { credits, ore };
+  return { credits, ore, hydrogen };
 }
+
+// ---- Hydrogen ---------------------------------------------------------------
+
+export const refineryCount = (s: GameState) => s.nodes.filter((n) => n.kind === 'gasgiant' && n.level > 0).length;
+
+export function refineryCost(s: GameState): Cost {
+  const h = CONFIG.hydrogen;
+  return { credits: round(h.refineryBase * h.refineryGrowth ** refineryCount(s)), ore: 0, shards: 0 };
+}
+
+export function refineryUpgradeCost(node: SectorNode): Cost {
+  const h = CONFIG.hydrogen;
+  const g = h.upgradeGrowth ** (node.level - 1);
+  return { credits: round(h.upgradeCredits * g), ore: round(h.upgradeOre * g), shards: 0 };
+}
+
+export function refineryOutput(node: SectorNode): number {
+  if (node.kind !== 'gasgiant' || node.level <= 0) return 0;
+  return CONFIG.hydrogen.output * node.level ** CONFIG.hydrogen.exponent;
+}
+
+/** Hydrogen needed to send these ships into an expedition of this tier. */
+export const jumpFuel = (tier: number, ships: number) => CONFIG.hydrogen.jumpPerShip * tier * ships;
 
 // ---- Trade ------------------------------------------------------------------
 

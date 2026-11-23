@@ -16,6 +16,7 @@ export function tickHome(s: GameState, dt: number): void {
   const inc = passiveIncome(s);
   s.credits += inc.credits * dt;
   s.ore += inc.ore * dt;
+  s.hydrogen += inc.hydrogen * dt;
 
   for (const n of s.nodes) {
     if (n.kind === 'station') n.stock = Math.min(CONFIG.station.stockCap, n.stock + CONFIG.station.stockRate * dt);
@@ -35,7 +36,12 @@ function tickHomeShip(s: GameState, ship: Ship, dt: number): void {
   ship.hull = Math.min(st.hull, ship.hull + st.hull * 0.05 * dt);
   ship.shield = Math.min(st.shield, ship.shield + st.shield * 0.1 * dt);
 
-  if (fly(ship, st.speedHome, dt)) return;
+  // flying burns hydrogen; with an empty tank ships crawl
+  const from = ship.pos;
+  const speed = st.speedHome * (s.hydrogen >= 1 ? 1 : CONFIG.hydrogen.emptySpeed); // below 1 H₂ counts as empty
+  const flying = fly(ship, speed, dt);
+  s.hydrogen = Math.max(0, s.hydrogen - dist(from, ship.pos) * CONFIG.hydrogen.burn[ship.type]);
+  if (flying) return;
   const here = nodeNear(s, ship.pos);
   if (!here) return;
 

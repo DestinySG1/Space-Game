@@ -217,6 +217,8 @@ document.addEventListener('click', (e) => {
     case 'deselect': ui.selShip = null; break;
     case 'colonize': run(A.colonize(s, arg)); break;
     case 'upgradePlanet': run(A.upgradePlanet(s, arg)); break;
+    case 'refinery': run(A.buildRefinery(s, arg)); break;
+    case 'upgradeRefinery': run(A.upgradeRefinery(s, arg)); break;
     case 'hangar': run(A.upgradeHangar(s)); break;
     case 'build': run(A.buildShip(s, arg as ShipType)); break;
     case 'research': run(A.research(s, arg as ModuleId)); break;

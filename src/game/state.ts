@@ -9,6 +9,7 @@ const PLANET_NAMES = [
   'Veyra', 'Kessa', 'Orun', 'Talis', 'Myrr', 'Ondra', 'Pell', 'Sarn', 'Ivo', 'Tesh', 'Calder', 'Nimra',
   'Brask', 'Eloa', 'Fenn', 'Gaudi', 'Hollis', 'Juno', 'Karst', 'Lysa', 'Mavro', 'Nox',
 ];
+const GAS_NAMES = ['Aru', 'Bellon', 'Corvax', 'Dravu', 'Eskar', 'Fyre'];
 const STATION_NAMES = ['Posten Ilk', 'Posten Duna', 'Posten Rhee', 'Posten Varn', 'Posten Sol', 'Posten Tamm', 'Posten Ura', 'Posten Wend'];
 const SHIP_NAMES = ['Kranich', 'Möwe', 'Falke', 'Elster', 'Reiher', 'Dohle', 'Milan', 'Lerche', 'Specht', 'Ibis'];
 
@@ -20,6 +21,7 @@ export function newGame(seed = Date.now() % 1_000_000): GameState {
     credits: CONFIG.start.credits,
     ore: CONFIG.start.ore,
     shards: CONFIG.start.shards,
+    hydrogen: CONFIG.start.hydrogen,
     nodes: generateSector(seed),
     ships: [],
     modules: { cargoBay: 0, tradeLink: 0, drillHead: 0, engines: 0, armor: 0, shields: 0, cannons: 0, scanner: 0 },
@@ -36,13 +38,13 @@ export function newGame(seed = Date.now() % 1_000_000): GameState {
   };
   addShip(s, 'hauler');
   addShip(s, 'miner');
-  log(s, 'Willkommen, Kommandant. Kolonisiere Planeten, handle zwischen Posten und baue Erz ab.');
+  log(s, 'Willkommen, Kommandant. Kolonisiere Planeten, handle zwischen Posten und baue Erz ab. Schiffe verbrauchen Wasserstoff – baue Raffinerien an Gasriesen.');
   return s;
 }
 
 function generateSector(seed: number): SectorNode[] {
   const rng = makeRng(seed);
-  const { radius, planets, stations, asteroids } = CONFIG.sector;
+  const { radius, planets, stations, asteroids, gasGiants } = CONFIG.sector;
   const free = rng.shuffle(hexesInRadius(radius).filter((h) => hexDistance(h, hex(0, 0)) >= 2));
   const taken: Hex[] = [];
   const take = (): Hex => {
@@ -70,6 +72,9 @@ function generateSector(seed: number): SectorNode[] {
       id: `a${i}`, kind: 'asteroid', name: `Gürtel ${String.fromCharCode(65 + i)}`, hex: take(),
       level: 1, stock: 0, ore: CONFIG.asteroid.oreMax,
     });
+  }
+  for (let i = 0; i < gasGiants; i++) {
+    nodes.push({ id: `g${i}`, kind: 'gasgiant', name: `Gasriese ${GAS_NAMES[i]}`, hex: take(), level: 0, stock: 0, ore: 0 });
   }
   return nodes;
 }

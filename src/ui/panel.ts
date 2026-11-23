@@ -2,8 +2,9 @@
 import { shuttleTargets } from '../game/actions';
 import { CONFIG, MODULES } from '../game/config';
 import {
-  beaconCost, canAfford, colonizeCost, hangarSlots, hangarUpgradeCost, planetOutput, planetUpgradeCost, researchCost,
-  shipCost, shipStats, tradeValuePerUnit, unlockThreshold, type Cost,
+  beaconCost, canAfford, colonizeCost, hangarSlots, hangarUpgradeCost, jumpFuel, passiveIncome, planetOutput, planetUpgradeCost,
+  refineryCost, refineryOutput, refineryUpgradeCost, researchCost, shipCost, shipStats, tradeValuePerUnit, unlockThreshold,
+  type Cost,
 } from '../game/economy';
 import { canJump, expeditionShips } from '../game/expedition';
 import { nodeById, nodeNear, shipById } from '../game/state';
@@ -16,6 +17,7 @@ const cost = (c: Partial<Cost>) =>
     c.credits ? `<span class="res cr">${fmt(c.credits)}</span>` : '',
     c.ore ? `<span class="res ore">${fmt(c.ore)}</span>` : '',
     c.shards ? `<span class="res sh">${fmt(c.shards)}</span>` : '',
+    c.hydrogen ? `<span class="res h2">${fmt(c.hydrogen)}</span>` : '',
   ].join(' ') || 'kostenlos';
 
 const btn = (action: string, text: string, opts: { arg?: string; disabled?: boolean; kind?: string } = {}) =>
@@ -39,6 +41,7 @@ export function topbar(s: GameState, ui: UIState): string {
       <span class="res cr" title="Credits">${fmt(s.credits)}</span>
       <span class="res ore" title="Erz">${fmt(s.ore)}</span>
       <span class="res sh" title="Echo-Splitter">${fmt(s.shards)}</span>
+      <span class="res h2 ${s.hydrogen < 1 ? 'empty' : ''}" title="Wasserstoff (Treibstoff)">${fmt(s.hydrogen)}</span>
     </div>
     <div class="views">
       <button class="vbtn ${ui.view === 'home' ? 'on' : ''}" data-action="view" data-arg="home">Heimat-Sektor</button>
@@ -78,21 +81,17 @@ function selectionPanel(s: GameState, ui: UIState): string {
       <li><b>Planeten</b> kolonisieren: liefern dauerhaft Credits oder Erz.</li>
       <li><b>Frachter</b> zwischen zwei <b>Handelsposten</b> pendeln lassen: je weiter, desto mehr Credits.</li>
       <li><b>Schürfer</b> zwischen <b>Gürtel</b> und <b>Heimatbasis</b> pendeln lassen: bringt Erz.</li>
+      <li>Fliegen kostet <b>Wasserstoff</b>. An <b>Gasriesen</b> Raffinerien bauen, sonst kriechen die Schiffe mit leerem Tank.</li>
       <li>Mit Erz und Credits einen <b>Sprungkern</b> schmieden und eine <b>Expedition</b> starten.</li>
     </ul>
     ${incomeSummary(s)}`;
 }
 
 function incomeSummary(s: GameState): string {
-  let cr = 0;
-  let ore = 0;
-  for (const n of s.nodes) {
-    const o = planetOutput(n);
-    cr += o.credits;
-    ore += o.ore;
-  }
-  return `<div class="card"><div class="muted small">Kolonien liefern pro Minute</div>
-    <span class="res cr">${fmt1(cr * 60)}</span> <span class="res ore">${fmt1(ore * 60)}</span></div>`;
+  const inc = passiveIncome(s);
+  return `<div class="card"><div class="muted small">Kolonien und Raffinerien liefern pro Minute</div>
+    <span class="res cr">${fmt1(inc.credits * 60)}</span> <span class="res ore">${fmt1(inc.ore * 60)}</span>
+    <span class="res h2">${fmt1(inc.hydrogen * 60)}</span></div>`;
 }
 
 function nodePanel(s: GameState, id: string): string {
@@ -121,6 +120,20 @@ function nodePanel(s: GameState, id: string): string {
       ${maxed ? '' : `<div class="muted small">nächste Stufe: <span class="res cr">${fmt1(on.credits * 60)}</span> <span class="res ore">${fmt1(on.ore * 60)}</span></div>`}</div>
       ${maxed ? '<p class="muted">Maximale Stufe.</p>' : btn('upgradePlanet', `Ausbauen · ${cost(c)}`, { arg: n.id, disabled: !canAfford(s, c) })}${shipList}`;
   }
+  if (n.kind === 'gasgiant') {
+    if (n.level === 0) {
+      const c = refineryCost(s);
+      return `<h2>${esc(n.name)}</h2><p>Gasriese. Eine Raffinerie gewinnt hier <span class="res h2">Wasserstoff</span>, den Treibstoff deiner Schiffe.</p>
+        ${btn('refinery', `Raffinerie bauen · ${cost(c)}`, { arg: n.id, disabled: !canAfford(s, c) })}${shipList}`;
+    }
+    const maxed = n.level >= CONFIG.hydrogen.maxLevel;
+    const c = refineryUpgradeCost(n);
+    const next = refineryOutput({ ...n, level: n.level + 1 });
+    return `<h2>${esc(n.name)} <span class="lvl">Raffinerie ${n.level}</span></h2>
+      <div class="card">pro Minute: <span class="res h2">${fmt1(refineryOutput(n) * 60)}</span>
+      ${maxed ? '' : `<div class="muted small">nächste Stufe: <span class="res h2">${fmt1(next * 60)}</span></div>`}</div>
+      ${maxed ? '<p class="muted">Maximale Stufe.</p>' : btn('upgradeRefinery', `Ausbauen · ${cost(c)}`, { arg: n.id, disabled: !canAfford(s, c) })}${shipList}`;
+  }
   if (n.kind === 'station') {
     const others = s.nodes.filter((x) => x.kind === 'station' && x.id !== n.id);
     return `<h2>${esc(n.name)}</h2><p>Produziert Waren. Frachter laden sie hier und verkaufen sie an einem anderen Posten.</p>
@@ -138,9 +151,12 @@ function shipPanel(s: GameState, ship: Ship): string {
     <div class="card stats">
       <div>Rumpf <b>${fmt(ship.hull)}</b>/${fmt(st.hull)}</div><div>Schild <b>${fmt(ship.shield)}</b>/${fmt(st.shield)}</div>
       ${st.dps ? `<div>Schaden <b>${fmt1(st.dps)}</b>/s</div>` : ''}
+      <div>Verbrauch <b>${fmt1(CONFIG.hydrogen.burn[ship.type] * 10)}</b> H₂/10 E.</div>
       ${ship.location === 'home' ? `<div>Ladung <b>${fmt(ship.cargo)}</b>/${fmt(st.cargoHome)}</div>` : `<div>Splitter <b>${fmt(ship.shards)}</b>/${fmt(st.cargoExp)}</div>`}
     </div>`;
-  const status = ship.target ? '<p class="muted small">unterwegs …</p>' : '';
+  const status = ship.target
+    ? `<p class="muted small">unterwegs …${ship.location === 'home' && s.hydrogen < 1 ? ' <b style="color:var(--bad)">Tank leer – nur 25 % Tempo</b>' : ''}</p>`
+    : '';
   if (ship.location === 'expedition') {
     return `${head}${status}<p class="muted small">Tippe irgendwo auf die Karte, um dorthin zu fliegen. Am Sprungtor kann das Schiff heimspringen.</p>
       ${btn('jump', 'Heimsprung', { arg: ship.id, disabled: !canJump(ship), kind: 'primary' })}
@@ -247,6 +263,8 @@ function expeditionPanel(s: GameState, ui: UIState): string {
   const home = s.ships.filter((x) => x.location === 'home');
   const tier = Math.min(ui.launchTier, s.maxTier);
   const have = s.beacons[tier] ?? 0;
+  const fuel = jumpFuel(tier, Math.max(1, ui.launch.length));
+  const fuelOk = s.hydrogen >= fuel;
   return `<h2>Expedition starten</h2>
     <p class="muted small">Dauer ${fmtTime(CONFIG.expedition.duration)}. Schiffe, die bei Ablauf noch drin sind, gehen verloren – mit ihrer Ladung.
     Sichere ${unlockThreshold(s.maxTier)} Splitter auf Stufe ${s.maxTier}, um die nächste Stufe freizuschalten.</p>
@@ -255,7 +273,8 @@ function expeditionPanel(s: GameState, ui: UIState): string {
       ${tiers.map((t) => btn('launchTier', `${t} (${s.beacons[t] ?? 0})`, { arg: String(t), kind: t === tier ? 'primary' : 'ghost' })).join(' ')}
       <div class="muted small" style="margin-top:8px">Schiffe (max. ${CONFIG.expedition.maxShips})</div>
       ${home.map((x) => `<label class="chk"><input type="checkbox" data-action="pick" data-arg="${x.id}" ${ui.launch.includes(x.id) ? 'checked' : ''}> ${CONFIG.ships[x.type].name} ${esc(x.name)}</label>`).join('') || '<p class="muted">Keine Schiffe zu Hause.</p>'}
-      ${btn('launch', have ? 'Sprung!' : 'Erst einen Sprungkern schmieden', { kind: 'primary', disabled: !have || ui.launch.length === 0 })}
+      <div class="muted small" style="margin-top:8px">Sprungtreibstoff: ${cost({ hydrogen: fuel })} (${CONFIG.hydrogen.jumpPerShip * tier} pro Schiff)</div>
+      ${btn('launch', !have ? 'Erst einen Sprungkern schmieden' : !fuelOk ? 'Zu wenig Wasserstoff' : 'Sprung!', { kind: 'primary', disabled: !have || !fuelOk || ui.launch.length === 0 })}
     </div>${last}${forge}`;
 }
 

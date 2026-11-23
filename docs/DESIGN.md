@@ -21,13 +21,15 @@ Zum Balancen nur dort ändern und danach `npm run balance` laufen lassen.
 ```
 
 - **Credits** und **Erz** kommen aus dem Heimat-Sektor (passiv und mit Schiffen).
+- **Wasserstoff (H₂)** ist Treibstoff: Schiffe verbrauchen ihn im Heimat-Sektor beim Fliegen,
+  und jede Expedition kostet Sprungtreibstoff. Er kommt aus Raffinerien an Gasriesen.
 - **Echo-Splitter** gibt es nur in Expeditionen. Sie sind der Engpass für Forschung, also für stärkere
   Schiffe, also für höhere Expeditionsstufen. Das verbindet beide Ebenen.
 
 ## Heimat-Sektor
 
 Karte mit Radius 8 Feldern (4× die Fläche des ersten Prototyps) mit Heimatbasis in der Mitte,
-18 Planeten, 6 Handelsposten und 10 Asteroidengürteln. Die Lage wird aus einem Seed erzeugt.
+18 Planeten, 6 Handelsposten, 10 Asteroidengürteln und 4 Gasriesen. Die Lage wird aus einem Seed erzeugt.
 
 **Freie Bewegung:** Schiffe fliegen auf direktem Weg an jeden Punkt der Karte und bleiben dort stehen.
 Das Hex-Raster dient nur zur Orientierung und zum Platzieren von Planeten, Posten und Gürteln.
@@ -46,6 +48,19 @@ einem eigenen Platz rund um ein Objekt. Fluggeschwindigkeit: 2 Einheiten/s im He
 | Handelsposten | erzeugt Waren | `0,12/s`, Lager max. 30 |
 | Warenwert | pro Einheit beim Verkauf an anderem Posten | `(6 + 4 × Distanz) × Handelsnetz-Bonus` |
 | Asteroidengürtel | Erz-Vorrat 400, wächst `0,3/s` nach | |
+| Gasriese + Raffinerie | Wasserstoff passiv | `0,12 × Stufe^1,15` pro s |
+| Raffinerie bauen | n-te Raffinerie | `300 × 1,6^n` Credits |
+| Raffinerie Stufe L → L+1 | | `250 × 1,75^(L−1)` Cr, `40 × 1,75^(L−1)` Erz |
+
+### Wasserstoff
+
+- Start: 120 H₂. Die Heimatbasis liefert immer `0,02/s` (1,2 pro Minute), damit man nie ganz feststeckt.
+- Verbrauch pro geflogener Einheit im Heimat-Sektor: Frachter und Schürfer 0,03, Wächter 0,05.
+  Stehende Schiffe verbrauchen nichts. In Expeditionen gibt es keinen Flugverbrauch.
+- Unter 1 H₂ gilt der Tank als leer: Alle Schiffe fliegen nur noch mit 25 % Tempo.
+- Sprungtreibstoff: `15 × Stufe` pro Schiff beim Start einer Expedition.
+- Gemessen: Mit den zwei Startschiffen reicht der Tank ca. 20 Minuten; eine Raffinerie (7,2/min)
+  deckt danach den Verbrauch und erlaubt etwa eine Expedition alle 15 Minuten.
 
 **Pendelrouten** automatisieren Schiffe: Frachter zwischen zwei Posten, Schürfer zwischen Gürtel und
 Basis. Sie sind der Hauptgrund, warum der Sektor offline weiterarbeitet.

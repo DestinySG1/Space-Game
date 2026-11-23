@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as A from '../src/game/actions';
 import { CONFIG } from '../src/game/config';
-import { colonizeCost, researchCost, shipStats } from '../src/game/economy';
+import { colonizeCost, jumpFuel, passiveIncome, refineryCost, researchCost, shipStats } from '../src/game/economy';
 import { GATE_POS, canJump, expeditionShips } from '../src/game/expedition';
 import { center, dist } from '../src/game/geom';
 import { hex, hexDistance, hexLine, hexesInRadius, pixelToHex, hexToPixel } from '../src/game/hex';
@@ -92,6 +92,58 @@ describe('home economy', () => {
     expect(A.buildShip(s, 'hauler').ok).toBe(false);
     expect(A.upgradeHangar(s).ok).toBe(true);
     expect(A.buildShip(s, 'hauler').ok).toBe(true);
+  });
+});
+
+describe('hydrogen', () => {
+  it('flying burns hydrogen, standing still does not', () => {
+    const s = newGame(30);
+    const ship = s.ships[0];
+    s.hydrogen = 100;
+    const base = CONFIG.hydrogen.baseOutput;
+    step(s, 10);
+    expect(s.hydrogen).toBeCloseTo(100 + base * 10, 6);
+    A.moveShip(s, ship.id, { x: ship.pos.x + 20, y: ship.pos.y });
+    const before = s.hydrogen;
+    step(s, 30);
+    expect(ship.target).toBeNull();
+    expect(before + base * 30 - s.hydrogen).toBeCloseTo(20 * CONFIG.hydrogen.burn[ship.type], 3);
+  });
+
+  it('an empty tank slows ships to a crawl but does not stop them', () => {
+    const s = newGame(31);
+    const ship = s.ships[0];
+    s.hydrogen = 0;
+    const start = { ...ship.pos };
+    A.moveShip(s, ship.id, { x: start.x + 30, y: start.y });
+    step(s, 1);
+    const moved = dist(start, ship.pos);
+    expect(moved).toBeGreaterThan(0);
+    expect(moved).toBeLessThan(shipStats(s, ship.type).speedHome * 0.3);
+  });
+
+  it('refineries on gas giants produce hydrogen and get pricier', () => {
+    const s = newGame(32);
+    s.credits = 1e6;
+    s.ore = 1e6;
+    const gg = s.nodes.filter((n) => n.kind === 'gasgiant');
+    expect(gg).toHaveLength(CONFIG.sector.gasGiants);
+    const first = refineryCost(s).credits;
+    expect(A.buildRefinery(s, gg[0].id).ok).toBe(true);
+    expect(refineryCost(s).credits).toBeGreaterThan(first);
+    expect(A.upgradeRefinery(s, gg[0].id).ok).toBe(true);
+    expect(passiveIncome(s).hydrogen).toBeCloseTo(CONFIG.hydrogen.baseOutput + CONFIG.hydrogen.output * 2 ** CONFIG.hydrogen.exponent);
+  });
+
+  it('an expedition needs jump fuel for every ship', () => {
+    const s = newGame(33);
+    s.beacons[1] = 1;
+    const ids = s.ships.map((x) => x.id);
+    s.hydrogen = jumpFuel(1, ids.length) - 1;
+    expect(A.launchExpedition(s, 1, ids, 1).ok).toBe(false);
+    s.hydrogen += 1;
+    expect(A.launchExpedition(s, 1, ids, 1).ok).toBe(true);
+    expect(s.hydrogen).toBeCloseTo(0);
   });
 });
 

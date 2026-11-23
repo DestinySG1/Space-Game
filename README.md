@@ -22,7 +22,8 @@ npm run balance    # Balancing-Bots: Heimat-Fortschritt und Expeditions-Überleb
   und bleibt dort stehen.
 - Frachter an einem Handelsposten → Pendelroute zu einem anderen Posten einrichten.
 - Schürfer an einem Gürtel oder an der Basis → Pendelroute einrichten.
-- Planeten antippen → kolonisieren und ausbauen.
+- Planeten antippen → kolonisieren und ausbauen. Gasriesen antippen → Raffinerie für Wasserstoff
+  (Treibstoff) bauen.
 - *Werft*: Schiffe bauen, Hangar erweitern. *Forschung*: Module. *Expedition*: Sprungkern
   schmieden, Flotte wählen, springen.
 - Unten links: **Testtempo** 1× / 10× / 60× zum schnellen Ausprobieren.

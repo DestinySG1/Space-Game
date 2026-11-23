@@ -9,6 +9,7 @@
   --cr: #f5c15c;
   --ore: #e8a95b;
   --sh: #ff7bf2;
+  --h2: #4fb3ff;
   --ok: #3ec28f;
   --bad: #ff5d6c;
   color-scheme: dark;
@@ -62,7 +63,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 .res { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .res::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 2px; vertical-align: 0; }
 .res.cr::before { background: var(--cr); border-radius: 50%; }
-.res.ore::before { background: var(--ore); }
+.res.ore::before, .res.h2::before { width: 16px; height: 16px; vertical-align: -3px; background: center / contain no-repeat; border-radius: 0; }
+.res.ore::before { background-image: url('./assets/metal.png'); }
+.res.h2::before { background-image: url('./assets/hydrogen.png'); }
+.resbar .res.ore::before, .resbar .res.h2::before { width: 20px; height: 20px; vertical-align: -5px; }
+.res.h2.empty { color: var(--bad); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .resbar .res.ore::before, .resbar .res.h2::before { width: 20px; height: 20px; vertical-align: -5px; }
+.res.h2.empty { animation: none; } }
 .res.sh::before { background: var(--sh); transform: rotate(45deg) scale(0.85); }
 .sh-t { color: var(--sh); }
 

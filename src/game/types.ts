@@ -20,14 +20,14 @@ export type ModuleId =
   | 'cannons'
   | 'scanner';
 
-export type NodeKind = 'base' | 'planet' | 'station' | 'asteroid';
+export type NodeKind = 'base' | 'planet' | 'station' | 'asteroid' | 'gasgiant';
 
 export interface SectorNode {
   id: string;
   kind: NodeKind;
   name: string;
   hex: Hex;
-  level: number; // planets: 0 = not colonized
+  level: number; // planets: 0 = not colonized; gas giants: refinery level, 0 = none
   planetType?: 'rock' | 'garden';
   stock: number; // stations: trade goods waiting
   ore: number; // asteroids: ore left
@@ -107,6 +107,7 @@ export interface GameState {
   credits: number;
   ore: number;
   shards: number;
+  hydrogen: number; // fuel: ships burn it while flying at home, expeditions need it to jump
   nodes: SectorNode[];
   ships: Ship[];
   modules: Record<ModuleId, number>;

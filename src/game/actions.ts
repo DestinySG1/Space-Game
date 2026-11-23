@@ -1,7 +1,8 @@
 // Everything the player can do. Each action validates, changes state and returns a message for the UI.
 import { CONFIG, MODULES } from './config';
 import {
-  beaconCost, canAfford, colonizeCost, hangarSlots, hangarUpgradeCost, pay, planetUpgradeCost, researchCost, shipCost,
+  beaconCost, canAfford, colonizeCost, hangarSlots, hangarUpgradeCost, jumpFuel, pay, planetUpgradeCost, refineryCost,
+  refineryUpgradeCost, researchCost, shipCost,
 } from './economy';
 import { GATE_POS, canJump, createExpedition, expeditionShips, gateSpot, jumpHome } from './expedition';
 import { dist, insideMap } from './geom';
@@ -37,6 +38,28 @@ export function upgradePlanet(s: GameState, nodeId: string): Result {
   pay(s, c);
   n.level += 1;
   return ok(`${n.name} auf Stufe ${n.level} ausgebaut.`);
+}
+
+export function buildRefinery(s: GameState, nodeId: string): Result {
+  const n = nodeById(s, nodeId);
+  if (!n || n.kind !== 'gasgiant' || n.level > 0) return fail('Hier kann keine Raffinerie gebaut werden.');
+  const c = refineryCost(s);
+  if (!canAfford(s, c)) return fail(notEnough);
+  pay(s, c);
+  n.level = 1;
+  log(s, `Raffinerie an ${n.name} gebaut.`);
+  return ok(`Raffinerie an ${n.name} gebaut.`);
+}
+
+export function upgradeRefinery(s: GameState, nodeId: string): Result {
+  const n = nodeById(s, nodeId);
+  if (!n || n.kind !== 'gasgiant' || n.level < 1) return fail('Erst eine Raffinerie bauen.');
+  if (n.level >= CONFIG.hydrogen.maxLevel) return fail('Maximale Stufe erreicht.');
+  const c = refineryUpgradeCost(n);
+  if (!canAfford(s, c)) return fail(notEnough);
+  pay(s, c);
+  n.level += 1;
+  return ok(`Raffinerie an ${n.name} auf Stufe ${n.level} ausgebaut.`);
 }
 
 export function upgradeHangar(s: GameState): Result {
@@ -131,6 +154,9 @@ export function launchExpedition(s: GameState, tier: number, shipIds: string[], 
   const ships = shipIds.map((id) => shipById(s, id)).filter((x) => x && x.location === 'home');
   if (ships.length === 0) return fail('Wähle mindestens ein Schiff.');
   if (ships.length > CONFIG.expedition.maxShips) return fail(`Höchstens ${CONFIG.expedition.maxShips} Schiffe.`);
+  const fuel = jumpFuel(tier, ships.length);
+  if (s.hydrogen < fuel) return fail(`Zu wenig Wasserstoff: Der Sprung braucht ${fuel}.`);
+  s.hydrogen -= fuel;
   s.beacons[tier] -= 1;
   s.expedition = createExpedition(s, tier, ships.map((x) => x!.id), seed);
   for (const ship of ships) {

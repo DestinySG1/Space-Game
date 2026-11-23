@@ -5,17 +5,18 @@ import type { ModuleId, ShipType } from './types';
 
 export const CONFIG = {
   saveKey: 'lumen-reach-save-v1',
-  saveVersion: 2,
+  saveVersion: 3,
   tick: 0.1, // fixed simulation step in seconds
   offlineCapSeconds: 8 * 3600,
 
-  start: { credits: 600, ore: 60, shards: 0 },
+  start: { credits: 600, ore: 60, shards: 0, hydrogen: 120 },
 
   sector: {
     radius: 8, // 4x the area of the first prototype
     planets: 18,
     stations: 6,
     asteroids: 10,
+    gasGiants: 4,
   },
 
   planet: {
@@ -38,6 +39,21 @@ export const CONFIG = {
   },
 
   asteroid: { oreMax: 400, regen: 0.3 },
+
+  hydrogen: {
+    baseOutput: 0.02, // per second from the home base, so you are never stuck for good
+    refineryBase: 300, // credits for the first refinery on a gas giant
+    refineryGrowth: 1.6, // per refinery already built
+    upgradeCredits: 250,
+    upgradeOre: 40,
+    upgradeGrowth: 1.75,
+    maxLevel: 10,
+    output: 0.12, // per second at level 1, × level^exponent
+    exponent: 1.15,
+    burn: { hauler: 0.03, miner: 0.03, warden: 0.05 }, // per world unit flown in the home sector
+    emptySpeed: 0.25, // speed factor with an empty tank
+    jumpPerShip: 15, // × tier, paid when an expedition starts
+  },
 
   hangar: { baseSlots: 3, upgradeCredits: 1200, upgradeOre: 200, growth: 2.0, maxLevel: 6 },
 
