@@ -1,5 +1,5 @@
 // Entry point. Configuration comes from environment variables (see .env.example in the repo root).
-import { buildApp } from './app.js';
+import { buildApp } from './app';
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? '0.0.0.0';

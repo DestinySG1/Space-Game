@@ -38,6 +38,10 @@ export class Cloud {
   private token = read(TOKEN_KEY);
   private rev = Number(read(REV_KEY) ?? 0);
 
+  get sessionToken(): string | null {
+    return this.token;
+  }
+
   constructor(
     private getState: () => GameState,
     private setState: (s: GameState, note: string) => void,

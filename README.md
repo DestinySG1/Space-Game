@@ -43,11 +43,12 @@ src/game/      reine Spiellogik, ohne DOM (testbar)
   economy.ts   Formeln: Kosten, Produktion, Schiffswerte
   home.ts      Simulation Heimat-Sektor
   expedition.ts Simulation Expedition (Wellen, Kampf, Abbau, Heimsprung)
+  anomaly.ts   Koop-Anomalie mit mehreren Spielern (läuft auf dem Server)
   actions.ts   alles, was der Spieler tun kann
   sim.ts       fester Zeitschritt, Speichern/Laden, Offline-Fortschritt
 src/ui/        Canvas-Rendering (render.ts), Grafiken (sprites.ts), Kamera (camera.ts), Seitenpanel
 tests/         Vitest
-server/        Node.js-Server: Konten, Cloud-Spielstände (SQLite), liefert das Spiel aus
+server/        Node.js-Server: Konten, Cloud-Spielstände (SQLite), Koop-Anomalien (WebSocket), liefert das Spiel aus
 deploy/        Caddy-Konfiguration für HTTPS
 scripts/       Balancing-Bots
 docs/DESIGN.md Spieldesign, Kreisläufe, Formeln, gemessenes Balancing

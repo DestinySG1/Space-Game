@@ -162,11 +162,34 @@ Ausbeute steigt aber mit jeder Minute.
 
 Der Heimat-Bot (mit aufgedeckter Karte) erreicht die erste Expedition nach etwa 7 Minuten Spielzeit.
 
+## Koop-Anomalien (mehrere Spieler)
+
+Läuft das Spiel vom eigenen Server (siehe `docs/SERVER.md`) und ist man angemeldet, kann man im
+Expeditions-Tab **„Koop: Mitspieler suchen“** wählen. Sprungkern und Sprungtreibstoff werden wie bei einer
+Einzel-Expedition verbraucht; wer vor dem Start abbricht, bekommt beides zurück.
+
+- **Warteschlange pro Stufe:** Ab 2 Spielern startet die Anomalie nach 5 s, mit 4 Spielern sofort,
+  spätestens nach 20 s auch allein.
+- **Ein gemeinsames System:** dieselben Vorkommen, dieselben Gegnerwellen, dieselbe Uhr. Jeder steuert nur
+  seine eigenen Schiffe; fremde Schiffe tragen den Spielernamen. Jeder Spieler kommt auf seiner eigenen
+  Seite des Tors an.
+- **Skalierung:** `+5` Vorkommen und `+60 %` Gegner pro Welle für jeden weiteren Spieler.
+- **Zusammenarbeit:** Wächter ziehen das Feuer auch von Schiffen der Mitspieler auf sich, Reparaturdrohnen
+  reparieren alle Schiffe in der Nähe. Splitter-Übergabe nur zwischen Schiffen desselben Spielers.
+- **Beute:** Was ein Schiff am Tor heimbringt, gehört seinem Besitzer. Freischalten der nächsten Stufe wie
+  bei Einzel-Expeditionen anhand der eigenen gesicherten Splitter.
+- **Technik:** Der Server rechnet die Anomalie (10 Schritte/s) und schickt 5 Stände/s per WebSocket; der
+  Client bewegt die Schiffe dazwischen weiter. Schiffswerte berechnet der Server selbst aus Typ und
+  Modulen (Stufen auf 5 begrenzt). Spieler, die kurz offline sind, bekommen Ergebnisse beim
+  Wiederverbinden; Schiffe aus Anomalien, die der Server nicht mehr kennt (z. B. nach einem Neustart),
+  kehren ohne Beute heim.
+- Die Logik liegt in `src/game/anomaly.ts` und wird vom Server mitgebündelt.
+
 ## Nächste Ausbaustufen (Ideen)
 
 - Mehr Gegnertypen, Gegner mit Fähigkeiten, Boss am Ende höherer Stufen
 - Mehrere Sektoren / Sektorkarte, die sich mit der Zeit erweitert
-- Koop-Expeditionen (Server nötig), Allianzen, gemeinsame Ziele
+- Gilden, Diplomatie, gemeinsame Ziele; Koop-Anomalien mit Freunden gezielt (Einladung statt Warteschlange)
 - Handel mit Ladungsarten und schwankenden Preisen
 - Tägliche Ereignisse, Erfolge, Tutorial
 - Grafik: Sprites/Shader statt Canvas-Formen, Sound

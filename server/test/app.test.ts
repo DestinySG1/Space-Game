@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildApp } from '../src/app.js';
+import { buildApp } from '../src/app';
 
 let app: ReturnType<typeof buildApp>;
 

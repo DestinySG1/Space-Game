@@ -193,6 +193,7 @@ export function stopShuttle(s: GameState, shipId: string): Result {
 
 export function launchExpedition(s: GameState, tier: number, shipIds: string[], seed = Math.floor(Math.random() * 1e9)): Result {
   if (s.expedition) return fail('Es läuft bereits eine Expedition.');
+  if (s.coop) return fail('Deine Schiffe sind gerade in einer Koop-Anomalie.');
   if ((s.beacons[tier] ?? 0) < 1) return fail(`Kein Sprungkern der Stufe ${tier} vorhanden.`);
   const ships = shipIds.map((id) => shipById(s, id)).filter((x) => x && x.location === 'home');
   if (ships.length === 0) return fail('Wähle mindestens ein Schiff.');

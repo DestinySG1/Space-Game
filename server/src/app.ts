@@ -1,14 +1,17 @@
 // HTTP API: accounts, sessions and cloud saves. Also serves the built game when STATIC_DIR is set.
 import fastifyStatic from '@fastify/static';
+import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { existsSync } from 'node:fs';
-import { FailLimiter, hashPassword, hashToken, newToken, validName, validPassword, verifyPassword } from './auth.js';
-import { openDb } from './db.js';
+import { FailLimiter, hashPassword, hashToken, newToken, validName, validPassword, verifyPassword } from './auth';
+import { CoopHub, type HubOptions } from './coop';
+import { openDb } from './db';
 
 export interface AppOptions {
   dbPath: string;
   staticDir?: string;
   logger?: boolean;
+  coop?: HubOptions & { autoStart?: boolean };
 }
 
 const SESSION_DAYS = 90;
@@ -43,19 +46,55 @@ export function buildApp(opts: AppOptions) {
     return token;
   }
 
-  /** The signed-in user, or null (and a 401 reply) when the token is missing or expired. */
-  function auth(req: FastifyRequest, reply: FastifyReply): { id: number; name: string } | null {
-    const header = req.headers.authorization ?? '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  /** The user behind a session token, or null when it is unknown or expired. */
+  function userFromToken(token: string): { id: number; name: string } | null {
     const row = token ? (q.session.get(hashToken(token)) as { id: number; name: string; lastSeen: number } | undefined) : undefined;
     const now = Date.now();
-    if (!row || now - row.lastSeen > SESSION_DAYS * 86400_000) {
-      reply.code(401).send({ error: 'Nicht angemeldet.' });
-      return null;
-    }
+    if (!row || now - row.lastSeen > SESSION_DAYS * 86400_000) return null;
     q.touchSession.run(now, hashToken(token));
     return { id: row.id, name: row.name };
   }
+
+  /** The signed-in user, or null (and a 401 reply) when the token is missing or expired. */
+  function auth(req: FastifyRequest, reply: FastifyReply): { id: number; name: string } | null {
+    const header = req.headers.authorization ?? '';
+    const user = userFromToken(header.startsWith('Bearer ') ? header.slice(7) : '');
+    if (!user) reply.code(401).send({ error: 'Nicht angemeldet.' });
+    return user;
+  }
+
+  // ---- co-op anomalies over WebSocket ------------------------------------------------
+  const hub = new CoopHub(opts.coop);
+  if (opts.coop?.autoStart !== false) hub.start();
+  app.register(fastifyWebsocket, { options: { maxPayload: 64 * 1024 } });
+  app.register(async (scope) => {
+    scope.get('/ws', { websocket: true }, (socket) => {
+      let name: string | null = null;
+      const authTimer = setTimeout(() => name || socket.close(), 10_000);
+      socket.on('message', (data: Buffer) => {
+        const raw = data.toString();
+        if (name) return hub.handle(name, socket, raw);
+        try {
+          const msg = JSON.parse(raw);
+          const user = msg.t === 'auth' ? userFromToken(String(msg.token ?? '')) : null;
+          if (!user) {
+            socket.send(JSON.stringify({ t: 'error', msg: 'Nicht angemeldet.' }));
+            return socket.close();
+          }
+          name = user.name;
+          clearTimeout(authTimer);
+          socket.send(JSON.stringify({ t: 'authed', name }));
+          hub.connect(name, socket);
+        } catch {
+          socket.close();
+        }
+      });
+      socket.on('close', () => {
+        clearTimeout(authTimer);
+        if (name) hub.disconnect(name, socket);
+      });
+    });
+  });
 
   app.get('/api/health', async () => ({ ok: true }));
 
@@ -132,6 +171,9 @@ export function buildApp(opts: AppOptions) {
     );
   }
 
-  app.addHook('onClose', async () => db.close());
-  return app;
+  app.addHook('onClose', async () => {
+    hub.stop();
+    db.close();
+  });
+  return Object.assign(app, { hub });
 }

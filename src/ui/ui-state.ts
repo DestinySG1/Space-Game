@@ -1,11 +1,12 @@
 import type { Vec } from '../game/types';
 import type { CloudView } from '../net/cloud';
+import type { CoopView } from '../net/coop';
 import { newCamera, type Camera } from './camera';
 
 export type Tab = 'select' | 'yard' | 'research' | 'expedition' | 'log' | 'account';
 
 export interface UIState {
-  view: 'home' | 'expedition';
+  view: 'home' | 'expedition' | 'coop';
   tab: Tab;
   selShip: string | null;
   selNode: string | null;
@@ -15,8 +16,9 @@ export interface UIState {
   launchTier: number;
   toast: { msg: string; ok: boolean; until: number } | null;
   confirmReset: boolean;
-  cams: { home: Camera; expedition: Camera };
+  cams: { home: Camera; expedition: Camera; coop: Camera };
   cloud: CloudView | null; // set by main once the cloud client exists
+  coop: CoopView | null;
 }
 
 export const initialUI = (): UIState => ({
@@ -30,6 +32,7 @@ export const initialUI = (): UIState => ({
   launchTier: 1,
   toast: null,
   confirmReset: false,
-  cams: { home: newCamera(6), expedition: newCamera(5) },
+  cams: { home: newCamera(6), expedition: newCamera(5), coop: newCamera(5) },
   cloud: null,
+  coop: null,
 });

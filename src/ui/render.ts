@@ -1,11 +1,11 @@
 // Canvas drawing for the home sector and the expedition map: camera, free flight, effects.
 import { CONFIG } from '../game/config';
-import { shipStats } from '../game/economy';
-import { GATE_POS, depositNear, enemyTarget, expeditionShips, inRange } from '../game/expedition';
+import { shipStats, type ShipStats } from '../game/economy';
+import { GATE_POS, enemyTarget, expeditionShips, inRange } from '../game/expedition';
 import { center, dist } from '../game/geom';
 import { hexKey, hexesInRadius } from '../game/hex';
 import { nodeById, nodeNear } from '../game/state';
-import type { Enemy, GameState, Ship, Vec } from '../game/types';
+import type { Deposit, Enemy, GameState, Ship, Vec } from '../game/types';
 import { clampCamera, type Camera } from './camera';
 import {
   SHIP_COLORS, fogTexture, drawAsteroids, drawBackground, drawBase, drawBeam, drawCrystals, drawEnemySprite, drawGasGiant, drawGate, drawPlanet,
@@ -165,7 +165,7 @@ function drawTrail(ctx: CanvasRenderingContext2D, v: View, pts: Vec[], head: Vec
 }
 
 /** Destination marker and line for ships that are flying somewhere. */
-function drawCourse(ctx: CanvasRenderingContext2D, v: View, ship: Ship, selected: boolean, now: number) {
+function drawCourse(ctx: CanvasRenderingContext2D, v: View, ship: DrawableShip, selected: boolean, now: number) {
   if (!ship.target) return;
   const a = toScreen(v, ship.pos);
   const b = toScreen(v, ship.target);
@@ -192,7 +192,7 @@ function drawCourse(ctx: CanvasRenderingContext2D, v: View, ship: Ship, selected
 }
 
 /** Dashed line from the selected ship to the mouse: where it would fly on click. */
-function drawAim(ctx: CanvasRenderingContext2D, v: View, ui: UIState, ship: Ship | undefined) {
+function drawAim(ctx: CanvasRenderingContext2D, v: View, ui: UIState, ship: DrawableShip | undefined) {
   if (!ship || !ui.hoverPoint) return;
   const a = toScreen(v, ship.pos);
   const b = toScreen(v, ui.hoverPoint);
@@ -209,7 +209,9 @@ function drawAim(ctx: CanvasRenderingContext2D, v: View, ui: UIState, ship: Ship
   ctx.stroke();
 }
 
-function drawShip(ctx: CanvasRenderingContext2D, s: GameState, v: View, key: string, ship: Ship, r: number, selected: boolean, now: number) {
+type DrawableShip = Pick<Ship, 'type' | 'pos' | 'target' | 'heading' | 'hull' | 'shield'>;
+
+function drawShip(ctx: CanvasRenderingContext2D, st: ShipStats, v: View, key: string, ship: DrawableShip, r: number, selected: boolean, now: number) {
   const p = toScreen(v, ship.pos);
   const moving = !!ship.target;
   drawTrail(ctx, v, trailFor(key, ship.pos, moving, now), ship.pos, SHIP_COLORS[ship.type], Math.max(1.5, r * 0.35));
@@ -223,7 +225,6 @@ function drawShip(ctx: CanvasRenderingContext2D, s: GameState, v: View, key: str
     ctx.setLineDash([]);
   }
   drawShipSprite(ctx, ship.type, p.x, p.y, ship.heading, r, moving ? 1 : 0, now);
-  const st = shipStats(s, ship.type, ship);
   if (selected || ship.hull < st.hull - 1 || ship.shield < st.shield - 1) {
     bar(ctx, p.x, p.y + r * 1.3, r * 2.6, ship.hull / st.hull, C.hull);
     if (st.shield > 0) bar(ctx, p.x, p.y + r * 1.3 + 4, r * 2.6, ship.shield / st.shield, C.shield);
@@ -368,7 +369,7 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
   drawAim(ctx, v, ui, selected);
   const shipPos = new Map<string, { x: number; y: number }>();
   const r = Math.max(4, z * S.ship);
-  for (const sh of ships) shipPos.set(sh.id, drawShip(ctx, s, v, `h:${sh.id}`, sh, r, sh === selected, now));
+  for (const sh of ships) shipPos.set(sh.id, drawShip(ctx, shipStats(s, sh.type, sh), v, `h:${sh.id}`, sh, r, sh === selected, now));
 
   if (z * S.planet > 8) {
     for (const n of s.nodes) {
@@ -384,9 +385,33 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
 
 // ---- expedition ------------------------------------------------------------------
 
+/** A ship as the anomaly renderer needs it; `mine` ships can be selected and steered. */
+export interface AnomalyShip extends DrawableShip {
+  id: string;
+  shards: number;
+  stats: ShipStats;
+  owner?: string;
+  mine: boolean;
+}
+
+export interface AnomalyData {
+  deposits: Deposit[];
+  enemies: Enemy[];
+  ships: AnomalyShip[];
+  elapsed: number;
+  duration: number;
+  time: number;
+}
+
+/** Single-player expedition: built from the local game state. */
 export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number): DrawResult {
   const ex = s.expedition!;
-  const cam = ui.cams.expedition;
+  const ships = expeditionShips(s).map((sh) => ({ ...sh, stats: shipStats(s, sh.type, sh), mine: true }));
+  return drawAnomaly(ctx, { deposits: ex.deposits, enemies: ex.enemies, ships, elapsed: ex.elapsed, duration: ex.duration, time: s.time }, ui, ui.cams.expedition, w, h, now);
+}
+
+/** Any anomaly: single-player expedition or a shared co-op run. */
+export function drawAnomaly(ctx: CanvasRenderingContext2D, d: AnomalyData, ui: UIState, cam: Camera, w: number, h: number, now: number): DrawResult {
   const { v, mapRadiusPx } = setupView(w, h, CONFIG.expedition.radius, cam);
   const z = v.size;
   drawBackground(ctx, w, h, cam.x, cam.y, 'anomaly', '#0b0614');
@@ -396,65 +421,68 @@ export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: 
   const g = toScreen(v, GATE_POS);
   drawGate(ctx, g.x, g.y, Math.max(8, z * S.gate), now);
 
-  ex.deposits.forEach((d, i) => {
-    const p = toScreen(v, center(d.hex));
-    if (onScreen(p, w, h, z * 2)) drawCrystals(ctx, p.x, p.y, Math.max(5, z * S.crystals), now, i * 977 + 13, d.shards > 0);
+  d.deposits.forEach((dep, i) => {
+    const p = toScreen(v, center(dep.hex));
+    if (onScreen(p, w, h, z * 2)) drawCrystals(ctx, p.x, p.y, Math.max(5, z * S.crystals), now, i * 977 + 13, dep.shards > 0);
   });
 
-  const ships = expeditionShips(s);
+  const ships = d.ships;
+  const wardens = ships.filter((x) => x.type === 'warden');
 
-  // beams: wardens fire at the nearest enemy in range, enemies at the nearest ship in range,
+  // beams: wardens fire at the nearest enemies in range, enemies at their target,
   // miners draw shards from the deposit they are parked at
   for (const sh of ships) {
     const sv = toScreen(v, sh.pos);
-    if (sh.type === 'warden') {
-      const st = shipStats(s, 'warden', sh);
-      for (const target of inRange(ex.enemies, sh.pos, CONFIG.ranges.weapon).slice(0, st.targets)) {
+    if (sh.stats.dps > 0) {
+      for (const target of inRange(d.enemies, sh.pos, CONFIG.ranges.weapon).slice(0, sh.stats.targets)) {
         const tv = toScreen(v, target.pos);
-        drawBeam(ctx, sv.x, sv.y, tv.x, tv.y, st.targets > 1 ? '#ffd27a' : '#8fd0ff', Math.max(1.5, z * (st.targets > 1 ? 0.06 : 0.1)), now);
+        drawBeam(ctx, sv.x, sv.y, tv.x, tv.y, sh.stats.targets > 1 ? '#ffd27a' : '#8fd0ff', Math.max(1.5, z * (sh.stats.targets > 1 ? 0.06 : 0.1)), now);
       }
     }
-    if (sh.type === 'miner' && !sh.target) {
-      const dep = depositNear(ex, sh.pos);
-      if (dep && sh.shards < shipStats(s, 'miner', sh).cargoExp - 1e-6) {
+    if (sh.stats.mineExp > 0 && !sh.target && sh.shards < sh.stats.cargoExp - 1e-6) {
+      const dep = d.deposits.find((x) => x.shards > 0 && dist(center(x.hex), sh.pos) <= CONFIG.ranges.dock);
+      if (dep) {
         const dp = toScreen(v, center(dep.hex));
         drawBeam(ctx, sv.x, sv.y, dp.x, dp.y, C.shard, Math.max(1, z * 0.08), now);
       }
     }
   }
-  for (const en of ex.enemies) {
-    if (en.target || en.stunnedUntil > s.time) continue;
-    const target = enemyTarget(en.pos, ships, ships.filter((x) => x.type === 'warden'));
+  for (const en of d.enemies) {
+    if (en.target || en.stunnedUntil > d.time) continue;
+    const target = enemyTarget(en.pos, ships as unknown as Ship[], wardens as unknown as Ship[]);
     if (!target || dist(target.pos, en.pos) > CONFIG.ranges.enemyAttack) continue;
     const a = toScreen(v, en.pos);
     const b = toScreen(v, target.pos);
     drawBeam(ctx, a.x, a.y, b.x, b.y, C.enemy, Math.max(1, z * 0.07), now);
   }
 
-  for (const en of ex.enemies) drawEnemy(ctx, v, en, now, en.stunnedUntil > s.time);
+  for (const en of d.enemies) drawEnemy(ctx, v, en, now, en.stunnedUntil > d.time);
 
-  const selected = ships.find((x) => x.id === ui.selShip);
-  for (const sh of ships) drawCourse(ctx, v, sh, sh === selected, now);
+  const selected = ships.find((x) => x.mine && x.id === ui.selShip);
+  for (const sh of ships) if (sh.mine) drawCourse(ctx, v, sh, sh === selected, now);
   drawAim(ctx, v, ui, selected);
   const shipPos = new Map<string, { x: number; y: number }>();
   const r = Math.max(5, z * S.ship * 1.1);
   for (const sh of ships) {
-    const p = drawShip(ctx, s, v, `x:${sh.id}`, sh, r, sh === selected, now);
-    shipPos.set(sh.id, p);
+    if (!sh.mine) ctx.globalAlpha = 0.85;
+    const p = drawShip(ctx, sh.stats, v, `x:${sh.owner ?? ''}/${sh.id}`, sh, r, sh === selected, now);
+    ctx.globalAlpha = 1;
+    if (sh.mine) shipPos.set(sh.id, p);
     if (sh.shards >= 1) label(ctx, `◆ ${Math.floor(sh.shards)}`, p.x, p.y - r * 2.4, C.shard, 11);
+    if (!sh.mine && sh.owner) label(ctx, sh.owner, p.x, p.y + r * 1.4 + 8, '#c9b6ff', 10);
   }
 
   if (z * S.planet > 8) {
     label(ctx, 'Sprungtor', g.x, g.y + z * S.label, '#5fd4ff', 11);
-    for (const d of ex.deposits) {
-      const p = toScreen(v, center(d.hex));
+    for (const dep of d.deposits) {
+      const p = toScreen(v, center(dep.hex));
       if (!onScreen(p, w, h, 60)) continue;
-      label(ctx, d.shards > 0 ? `${Math.floor(d.shards)}` : 'leer', p.x, p.y + z * S.label, d.shards > 0 ? C.shard : C.dim, 11);
+      label(ctx, dep.shards > 0 ? `${Math.floor(dep.shards)}` : 'leer', p.x, p.y + z * S.label, dep.shards > 0 ? C.shard : C.dim, 11);
     }
   }
 
   // collapse warning
-  const left = ex.duration - ex.elapsed;
+  const left = d.duration - d.elapsed;
   if (left < CONFIG.expedition.collapseWarning) {
     const pulse = 0.25 + 0.25 * Math.sin(now / 200);
     const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);

@@ -43,7 +43,7 @@ export interface Ship {
   id: string;
   type: ShipType;
   name: string;
-  location: 'home' | 'expedition';
+  location: 'home' | 'expedition' | 'coop'; // coop: away in a shared anomaly on the server
   pos: Vec;
   target: Vec | null; // where it is flying to, null when standing still
   heading: number; // radians, kept while standing
@@ -126,6 +126,7 @@ export interface GameState {
   beacons: Record<number, number>; // tier -> count
   maxTier: number;
   expedition: Expedition | null;
+  coop?: { tier: number; shipIds: string[]; fuel: number; started: boolean } | null; // ships sent to a co-op anomaly
   lastResult: ExpeditionResult | null;
   nextId: number;
   kills: number;

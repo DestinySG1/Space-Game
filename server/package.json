@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Server für Lumen Reach: Konten und Cloud-Spielstände",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/index.js",
     "start": "node --disable-warning=ExperimentalWarning dist/index.js",
     "dev": "tsc && node --disable-warning=ExperimentalWarning dist/index.js",
     "test": "vitest run"
@@ -11,10 +11,12 @@
   "license": "UNLICENSED",
   "dependencies": {
     "@fastify/static": "^8.3.0",
+    "@fastify/websocket": "^11.3.7",
     "fastify": "^5.12.8"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "esbuild": "^0.25.12",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   },

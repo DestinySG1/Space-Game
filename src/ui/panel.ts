@@ -1,5 +1,6 @@
 // Side panel: HTML built from state. Buttons carry data-action / data-arg, handled in main.ts.
 import { cooldownLeft, shuttleTargets } from '../game/actions';
+import { canJumpRun } from '../game/anomaly';
 import { CONFIG, MODULES, SLOTS, SLOT_NAMES, moduleInfo } from '../game/config';
 import {
   beaconCost, canAfford, colonizeCost, hangarSlots, hangarUpgradeCost, jumpFuel, passiveIncome, planetOutput, planetUpgradeCost,
@@ -46,6 +47,7 @@ export function topbar(s: GameState, ui: UIState): string {
     <div class="views">
       <button class="vbtn ${ui.view === 'home' ? 'on' : ''}" data-action="view" data-arg="home">Heimat-Sektor</button>
       ${ex ? `<button class="vbtn ${ui.view === 'expedition' ? 'on' : ''} ${ex.duration - ex.elapsed < CONFIG.expedition.collapseWarning ? 'warn' : ''}" data-action="view" data-arg="expedition">Expedition ${fmtTime(ex.duration - ex.elapsed)}</button>` : ''}
+      ${coopButton(ui)}
     </div>`;
 }
 
@@ -70,6 +72,7 @@ export function panel(s: GameState, ui: UIState): string {
 // ---- Selection ---------------------------------------------------------------
 
 function selectionPanel(s: GameState, ui: UIState): string {
+  if (ui.view === 'coop') return coopPanel(ui);
   const ship = shipById(s, ui.selShip);
   if (ship && ((ui.view === 'home') === (ship.location === 'home'))) return shipPanel(s, ship);
   const node = ui.view === 'home' ? nodeById(s, ui.selNode) : undefined;
@@ -221,7 +224,7 @@ function yardPanel(s: GameState): string {
     }).join('')}
     <h3>Flotte</h3>
     ${s.ships.map((x) => `<div class="fleet">${btn('selectShip', `${CONFIG.ships[x.type].name} ${esc(x.name)}`, { arg: x.id, kind: 'ghost' })}
-      <span class="muted small">${x.location === 'expedition' ? 'in Expedition' : x.shuttle ? 'pendelt' : x.target ? 'unterwegs' : 'bereit'}</span></div>`).join('') || '<p class="muted">Keine Schiffe.</p>'}`;
+      <span class="muted small">${x.location === 'expedition' ? 'in Expedition' : x.location === 'coop' ? 'in Koop-Anomalie' : x.shuttle ? 'pendelt' : x.target ? 'unterwegs' : 'bereit'}</span></div>`).join('') || '<p class="muted">Keine Schiffe.</p>'}`;
 }
 
 // ---- Research ----------------------------------------------------------------
@@ -295,6 +298,7 @@ function expeditionPanel(s: GameState, ui: UIState): string {
   if (s.expedition) {
     return `<h2>Expedition läuft</h2>${expeditionHelp(s)}${btn('view', 'Zur Expedition', { arg: 'expedition', kind: 'primary' })}${forge}`;
   }
+  if (s.coop) return `${coopSection(s, ui, false)}${forge}`;
 
   const home = s.ships.filter((x) => x.location === 'home');
   const tier = Math.min(ui.launchTier, s.maxTier);
@@ -310,8 +314,9 @@ function expeditionPanel(s: GameState, ui: UIState): string {
       <div class="muted small" style="margin-top:8px">Schiffe (max. ${CONFIG.expedition.maxShips})</div>
       ${home.map((x) => `<label class="chk"><input type="checkbox" data-action="pick" data-arg="${x.id}" ${ui.launch.includes(x.id) ? 'checked' : ''}> ${CONFIG.ships[x.type].name} ${esc(x.name)}</label>`).join('') || '<p class="muted">Keine Schiffe zu Hause.</p>'}
       <div class="muted small" style="margin-top:8px">Sprungtreibstoff: ${cost({ hydrogen: fuel })} (${CONFIG.hydrogen.jumpPerShip * tier} pro Schiff)</div>
-      ${btn('launch', !have ? 'Erst einen Sprungkern schmieden' : !fuelOk ? 'Zu wenig Wasserstoff' : 'Sprung!', { kind: 'primary', disabled: !have || !fuelOk || ui.launch.length === 0 })}
-    </div>${last}${forge}`;
+      <div class="row">${btn('launch', !have ? 'Erst einen Sprungkern schmieden' : !fuelOk ? 'Zu wenig Wasserstoff' : 'Allein springen', { kind: 'primary', disabled: !have || !fuelOk || ui.launch.length === 0 })}
+      ${ui.cloud?.name && ui.coop?.status === 'idle' ? btn('coopQueue', 'Koop: Mitspieler suchen', { kind: 'primary', disabled: !have || !fuelOk || ui.launch.length === 0 }) : ''}</div>
+    </div>${coopSection(s, ui, true)}${last}${forge}`;
 }
 
 const clock = (ms: number) => new Date(ms).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
@@ -353,6 +358,76 @@ function accountPanel(ui: UIState): string {
     ${choice}
     <div class="row">${btn('cloudSave', 'Jetzt sichern', { disabled: c.busy || !!c.choice })} ${btn('cloudLogout', 'Abmelden', { kind: 'ghost', disabled: c.busy })}</div>
     ${msg}`;
+}
+
+// ---- co-op ---------------------------------------------------------------------------
+
+function coopButton(ui: UIState): string {
+  const c = ui.coop;
+  if (!c || c.status !== 'running' || !c.snap) return '';
+  const left = c.snap.duration - c.snap.elapsed;
+  return `<button class="vbtn ${ui.view === 'coop' ? 'on' : ''} ${left < CONFIG.expedition.collapseWarning ? 'warn' : ''}" data-action="view" data-arg="coop">Koop ${fmtTime(left)}</button>`;
+}
+
+/** Co-op status in the expedition tab. `idleHint` explains how to start when nothing is running. */
+function coopSection(s: GameState, ui: UIState, idleHint: boolean): string {
+  const c = ui.coop;
+  if (!ui.cloud?.name) {
+    return idleHint
+      ? `<div class="card"><b>Koop-Anomalien</b><div class="muted small">Gemeinsam mit anderen Spielern in eine Anomalie springen:
+         melde dich im Tab <b>Konto</b> an (nur wenn das Spiel von deinem Server läuft).</div></div>`
+      : '';
+  }
+  if (!c || c.status === 'off' || c.status === 'connecting') return `<div class="card"><b>Koop-Anomalien</b><div class="muted small">Verbinde mit dem Server …</div></div>`;
+  if (c.status === 'queued') {
+    const q = c.queued;
+    return `<h2>Koop-Suche</h2><div class="card">Stufe <b>${q?.tier ?? s.coop?.tier ?? '?'}</b> · ${q?.waiting ?? 1} Spieler warten ·
+      Start in <b>${q?.startsIn ?? '…'} s</b>
+      <div class="muted small">Ab 2 Spielern geht es nach kurzem Countdown los, spätestens nach 20 s auch allein. Bis zu 4 Spieler.</div>
+      ${btn('coopCancel', 'Abbrechen (Sprungkern zurück)', { kind: 'ghost' })}</div>`;
+  }
+  if (c.status === 'running') {
+    return `<h2>Koop-Anomalie läuft</h2>${btn('view', 'Zur Koop-Anomalie', { arg: 'coop', kind: 'primary' })}`;
+  }
+  const last = c.lastEnd
+    ? `<div class="card"><b>Letzte Koop-Anomalie</b> (Stufe ${c.lastEnd.tier})
+        ${c.lastEnd.players.map((p) => `<div class="small">${esc(p.name)}: ${p.banked} Splitter, ${p.lost} Schiff(e) verloren</div>`).join('')}</div>`
+    : '';
+  return idleHint
+    ? `<div class="card"><b>Koop-Anomalien</b><div class="muted small">Wähle oben Stufe und Schiffe und tippe auf <b>Koop: Mitspieler suchen</b>.
+       Mit mehr Spielern gibt es mehr Gegner, aber auch mehr Vorkommen; jeder behält, was seine Schiffe heimbringen.</div></div>${last}`
+    : last;
+}
+
+/** Side panel while looking at the co-op map. */
+function coopPanel(ui: UIState): string {
+  const c = ui.coop;
+  const snap = c?.snap;
+  if (!c || !snap) return '<p class="muted">Keine Koop-Anomalie aktiv.</p>';
+  const mine = snap.ships.filter((x) => x.owner === c.me);
+  const sel = mine.find((x) => x.id === ui.selShip);
+  const ability = (x: (typeof mine)[number]) => {
+    if (!x.active) return '';
+    const left = Math.max(0, x.readyAt - snap.time);
+    const name = moduleInfo(x.active.id).name;
+    return btn('coopAbility', left > 0 ? `${name} · ${Math.ceil(left)} s` : `${name} auslösen`, { arg: x.id, disabled: left > 0, kind: 'primary' });
+  };
+  if (sel) {
+    return `<h2>${CONFIG.ships[sel.type].name} „${esc(sel.name)}“</h2>
+      <div class="card stats"><div>Rumpf <b>${fmt(sel.hull)}</b>/${fmt(sel.stats.hull)}</div><div>Schild <b>${fmt(sel.shield)}</b>/${fmt(sel.stats.shield)}</div>
+      <div>Splitter <b>${fmt(sel.shards)}</b>/${fmt(sel.stats.cargoExp)}</div></div>
+      <p class="muted small">Tippe irgendwo auf die Karte, um dorthin zu fliegen. Am Sprungtor kann das Schiff heimspringen.</p>
+      <div class="row">${btn('coopJump', 'Heimsprung', { arg: sel.id, disabled: !canJumpRun(sel), kind: 'primary' })} ${ability(sel)}</div>
+      ${btn('deselect', 'Abwählen', { kind: 'ghost' })}`;
+  }
+  return `<h2>Koop-Anomalie Stufe ${snap.tier}</h2>
+    <div class="card">Restzeit <b>${fmtTime(snap.duration - snap.elapsed)}</b> · Welle ${snap.waveIndex} · Gegner ${snap.enemies.length}</div>
+    <div class="card"><div class="muted small">Spieler</div>
+      ${snap.players.map((p) => `<div class="small">${p.name === c.me ? '<b>' : ''}${esc(p.name)}${p.name === c.me ? ' (du)</b>' : ''} · ${p.banked} Splitter gesichert · ${snap.ships.filter((x) => x.owner === p.name).length} Schiff(e) drin</div>`).join('')}</div>
+    <p class="muted small">Steuere deine Schiffe; die der anderen siehst du mit Namen. Wächter schützen alle in der Nähe.</p>
+    ${mine.map((x) => btn('selectCoopShip', `${CONFIG.ships[x.type].name} ${esc(x.name)} ◆${Math.floor(x.shards)}`, { arg: x.id, kind: 'ghost' })).join(' ') || '<p class="muted">Alle deine Schiffe sind draußen.</p>'}
+    <div class="row">${mine.map(ability).join(' ')}</div>
+    <div class="row">${btn('coopRecall', 'Alle zum Tor')} ${btn('coopJumpAll', 'Alle am Tor: Heimsprung', { kind: 'primary' })}</div>`;
 }
 
 function logPanel(s: GameState, ui: UIState): string {

@@ -9,9 +9,12 @@ import type { GameState, ModuleId, ShipType, SlotType, Vec } from './game/types'
 import { fmtTime } from './ui/format';
 import { panel, tabs, topbar } from './ui/panel';
 import { resetCamera, zoomAt } from './ui/camera';
-import { drawExpedition, drawHome, toWorld, type DrawResult } from './ui/render';
+import { drawAnomaly, drawExpedition, drawHome, toWorld, type DrawResult } from './ui/render';
 import { initialUI, type Tab } from './ui/ui-state';
 import { Cloud } from './net/cloud';
+import { Coop } from './net/coop';
+import { coopGateSpot } from './game/anomaly';
+import { coopData } from './ui/coop-view';
 
 function storage(): Storage | null {
   try {
@@ -92,6 +95,7 @@ const cam = () => ui.cams[ui.view];
 
 /** A short tap selects or gives a move order; dragging pans; wheel and pinch zoom. */
 function handleTap(clientX: number, clientY: number) {
+  if (ui.view === 'coop') return coopTap(clientX, clientY);
   const shipId = shipAt(clientX, clientY);
   const selected = shipById(s, ui.selShip);
   const selectedHere = selected && (selected.location === 'home') === (ui.view === 'home');
@@ -118,6 +122,19 @@ function handleTap(clientX: number, clientY: number) {
       ui.selShip = null;
       ui.tab = 'select';
     }
+  }
+  refreshPanel(true);
+}
+
+/** On the co-op map only your own ships can be selected; a tap elsewhere sends the selected one there. */
+function coopTap(clientX: number, clientY: number) {
+  const shipId = shipAt(clientX, clientY);
+  if (shipId) {
+    ui.selShip = shipId === ui.selShip ? null : shipId;
+    ui.tab = 'select';
+  } else {
+    const p = pointAt(clientX, clientY);
+    if (p && ui.selShip) coop.move(ui.selShip, p);
   }
   refreshPanel(true);
 }
@@ -150,8 +167,19 @@ const cloud = new Cloud(
   () => refreshPanel(true),
 );
 ui.cloud = cloud.view;
-void cloud.start();
-setInterval(() => void cloud.push(), 60_000);
+
+const coop = new Coop(
+  () => cloud.sessionToken,
+  () => s,
+  () => refreshPanel(true),
+  (msg, ok) => toast(msg, ok),
+);
+ui.coop = coop.view;
+coop.onStart = () => {
+  ui.view = 'coop';
+  ui.tab = 'select';
+  ui.selShip = null;
+};
 
 document.addEventListener('submit', (e) => {
   const form = e.target as HTMLFormElement;
@@ -235,7 +263,12 @@ document.addEventListener('click', (e) => {
   const arg = el.dataset.arg ?? '';
   switch (el.dataset.action) {
     case 'tab': ui.tab = arg as Tab; ui.confirmReset = false; break;
-    case 'view': ui.view = arg === 'expedition' && s.expedition ? 'expedition' : 'home'; ui.selShip = null; ui.selNode = null; if (ui.view === 'expedition') ui.tab = 'select'; break;
+    case 'view':
+      ui.view = arg === 'expedition' && s.expedition ? 'expedition' : arg === 'coop' && coop.view.snap ? 'coop' : 'home';
+      ui.selShip = null;
+      ui.selNode = null;
+      if (ui.view !== 'home') ui.tab = 'select';
+      break;
     case 'speed': ui.speed = Number(arg); break;
     case 'zoomIn': zoomAt(cam(), 1.3, cssW / 2, cssH / 2, cssW, cssH); break;
     case 'zoomOut': zoomAt(cam(), 1 / 1.3, cssW / 2, cssH / 2, cssW, cssH); break;
@@ -250,6 +283,23 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'deselect': ui.selShip = null; break;
+    case 'coopQueue': {
+      const err = coop.queue(Math.min(ui.launchTier, s.maxTier), ui.launch);
+      toast(err ?? 'Suche nach Mitspielern …', !err);
+      if (!err) ui.launch = [];
+      break;
+    }
+    case 'coopCancel': coop.cancel(); break;
+    case 'selectCoopShip': ui.selShip = arg; break;
+    case 'coopJump': coop.jump(arg); ui.selShip = null; break;
+    case 'coopAbility': coop.ability(arg); break;
+    case 'coopRecall':
+      for (const x of coop.view.snap?.ships ?? []) if (x.owner === coop.view.me) coop.move(x.id, coopGateSpot(x.owner, x.id));
+      toast('Deine Schiffe fliegen zum Sprungtor.', true);
+      break;
+    case 'coopJumpAll':
+      for (const x of coop.view.snap?.ships ?? []) if (x.owner === coop.view.me) coop.jump(x.id);
+      break;
     case 'colonize': run(A.colonize(s, arg)); break;
     case 'upgradePlanet': run(A.upgradePlanet(s, arg)); break;
     case 'refinery': run(A.buildRefinery(s, arg)); break;
@@ -339,9 +389,13 @@ function frame(now: number) {
   last = now;
   step(s, dt * ui.speed);
   if (ui.view === 'expedition' && !s.expedition) ui.view = 'home';
-  lastDraw = ui.view === 'expedition' && s.expedition
-    ? drawExpedition(ctx, s, ui, cssW, cssH, now)
-    : drawHome(ctx, s, ui, cssW, cssH, now);
+  const coopNow = ui.view === 'coop' ? coopData(coop.view, now) : null;
+  if (ui.view === 'coop' && !coopNow) ui.view = 'home';
+  lastDraw = coopNow
+    ? drawAnomaly(ctx, coopNow, ui, ui.cams.coop, cssW, cssH, now)
+    : ui.view === 'expedition' && s.expedition
+      ? drawExpedition(ctx, s, ui, cssW, cssH, now)
+      : drawHome(ctx, s, ui, cssW, cssH, now);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -354,3 +408,12 @@ window.addEventListener('pagehide', () => {
   void cloud.push(false, true);
 });
 refreshPanel(true);
+
+// start talking to the server only once everything above is set up
+void cloud.start();
+setInterval(() => void cloud.push(), 60_000);
+// keep the co-op connection open while signed in
+setInterval(() => {
+  if (cloud.view.name) coop.connect();
+  else if (coop.view.status !== 'off') coop.disconnect();
+}, 1000);
