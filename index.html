@@ -12,6 +12,11 @@
       <main class="mapwrap">
         <canvas id="map" aria-label="Sternenkarte"></canvas>
         <div id="speed" class="speed"></div>
+        <div class="zoom" role="group" aria-label="Kamera">
+          <button class="zbtn" data-action="zoomIn" aria-label="Hineinzoomen">+</button>
+          <button class="zbtn" data-action="zoomOut" aria-label="Herauszoomen">−</button>
+          <button class="zbtn" data-action="zoomReset" aria-label="Ansicht zurücksetzen">⌂</button>
+        </div>
         <div id="toast" class="toast" role="status" aria-live="polite"></div>
       </main>
       <aside class="side">

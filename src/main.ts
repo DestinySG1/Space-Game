@@ -7,7 +7,8 @@ import { newGame, nodeAt, shipById } from './game/state';
 import type { GameState, Hex, ModuleId, ShipType } from './game/types';
 import { fmtTime } from './ui/format';
 import { panel, tabs, topbar } from './ui/panel';
-import { drawExpedition, drawHome, type View } from './ui/render';
+import { resetCamera, zoomAt } from './ui/camera';
+import { drawExpedition, drawHome, type DrawResult } from './ui/render';
 import { initialUI, type Tab } from './ui/ui-state';
 
 function storage(): Storage | null {
@@ -32,7 +33,7 @@ const elPanel = $('panel');
 const elToast = $('toast');
 const elSpeed = $('speed');
 
-let lastDraw: { view: View; shipPos: Map<string, { x: number; y: number }> } | null = null;
+let lastDraw: DrawResult | null = null;
 let cssW = 0;
 let cssH = 0;
 
@@ -85,12 +86,11 @@ function shipAt(clientX: number, clientY: number): string | null {
   return best;
 }
 
-canvas.addEventListener('pointermove', (e) => {
-  ui.hoverHex = e.pointerType === 'mouse' ? hexAt(e.clientX, e.clientY) : null;
-});
-canvas.addEventListener('pointerleave', () => (ui.hoverHex = null));
-canvas.addEventListener('click', (e) => {
-  const shipId = shipAt(e.clientX, e.clientY);
+const cam = () => ui.cams[ui.view];
+
+/** A short tap selects or gives a move order; dragging pans; wheel and pinch zoom. */
+function handleTap(clientX: number, clientY: number) {
+  const shipId = shipAt(clientX, clientY);
   const selected = shipById(s, ui.selShip);
   const selectedHere = selected && (selected.location === 'home') === (ui.view === 'home');
   if (shipId && shipId !== ui.selShip) {
@@ -100,7 +100,7 @@ canvas.addEventListener('click', (e) => {
   } else if (shipId && shipId === ui.selShip) {
     ui.selShip = null;
   } else {
-    const h = hexAt(e.clientX, e.clientY);
+    const h = hexAt(clientX, clientY);
     if (!h) return;
     if (selectedHere) {
       const r = A.moveShip(s, selected.id, h);
@@ -112,7 +112,74 @@ canvas.addEventListener('click', (e) => {
     }
   }
   refreshPanel(true);
+}
+
+const pointers = new Map<number, { x: number; y: number }>();
+let gesture = { sx: 0, sy: 0, moved: false };
+const localXY = (clientX: number, clientY: number) => {
+  const r = canvas.getBoundingClientRect();
+  return { x: clientX - r.left, y: clientY - r.top };
+};
+
+canvas.addEventListener('pointerdown', (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 1) gesture = { sx: e.clientX, sy: e.clientY, moved: false };
+  else gesture.moved = true; // a second finger means pinch, never a tap
 });
+
+canvas.addEventListener('pointermove', (e) => {
+  const prev = pointers.get(e.pointerId);
+  if (!prev) {
+    ui.hoverHex = e.pointerType === 'mouse' ? hexAt(e.clientX, e.clientY) : null;
+    return;
+  }
+  if (pointers.size === 1) {
+    if (!gesture.moved && Math.hypot(e.clientX - gesture.sx, e.clientY - gesture.sy) > 6) {
+      gesture.moved = true;
+      canvas.classList.add('panning');
+    }
+    if (gesture.moved) {
+      cam().x += e.clientX - prev.x;
+      cam().y += e.clientY - prev.y;
+    }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  } else if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    const other = a === prev ? b : a;
+    const before = Math.hypot(prev.x - other.x, prev.y - other.y);
+    const after = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+    const mid = localXY((e.clientX + other.x) / 2, (e.clientY + other.y) / 2);
+    cam().x += (e.clientX - prev.x) / 2;
+    cam().y += (e.clientY - prev.y) / 2;
+    if (before > 10) zoomAt(cam(), after / before, mid.x, mid.y, cssW, cssH);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  }
+  ui.hoverHex = null;
+});
+
+function endPointer(e: PointerEvent, tap: boolean) {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.delete(e.pointerId);
+  if (pointers.size === 0) {
+    canvas.classList.remove('panning');
+    if (tap && !gesture.moved) handleTap(e.clientX, e.clientY);
+  }
+}
+canvas.addEventListener('pointerup', (e) => endPointer(e, true));
+canvas.addEventListener('pointercancel', (e) => endPointer(e, false));
+canvas.addEventListener('pointerleave', (e) => {
+  if (e.pointerType === 'mouse') ui.hoverHex = null;
+});
+canvas.addEventListener(
+  'wheel',
+  (e) => {
+    e.preventDefault();
+    const p = localXY(e.clientX, e.clientY);
+    zoomAt(cam(), Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)), p.x, p.y, cssW, cssH);
+  },
+  { passive: false },
+);
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     ui.selShip = null;
@@ -135,6 +202,9 @@ document.addEventListener('click', (e) => {
     case 'tab': ui.tab = arg as Tab; ui.confirmReset = false; break;
     case 'view': ui.view = arg === 'expedition' && s.expedition ? 'expedition' : 'home'; ui.selShip = null; ui.selNode = null; if (ui.view === 'expedition') ui.tab = 'select'; break;
     case 'speed': ui.speed = Number(arg); break;
+    case 'zoomIn': zoomAt(cam(), 1.3, cssW / 2, cssH / 2, cssW, cssH); break;
+    case 'zoomOut': zoomAt(cam(), 1 / 1.3, cssW / 2, cssH / 2, cssW, cssH); break;
+    case 'zoomReset': resetCamera(cam()); break;
     case 'selectShip': {
       const ship = shipById(s, arg);
       if (ship) {
@@ -228,8 +298,8 @@ function frame(now: number) {
   step(s, dt * ui.speed);
   if (ui.view === 'expedition' && !s.expedition) ui.view = 'home';
   lastDraw = ui.view === 'expedition' && s.expedition
-    ? drawExpedition(ctx, s, ui, cssW, cssH, now)
-    : drawHome(ctx, s, ui, cssW, cssH);
+    ? drawExpedition(ctx, s, ui, cssW, cssH, now, dt)
+    : drawHome(ctx, s, ui, cssW, cssH, now, dt);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

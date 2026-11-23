@@ -17,6 +17,7 @@ npm run balance    # Balancing-Bots: Heimat-Fortschritt und Expeditions-Überleb
 
 ## Spielen
 
+- Karte ziehen zum Verschieben, Mausrad / zwei Finger / Buttons +, −, ⌂ zum Zoomen.
 - Schiff antippen, dann ein Feld antippen: Das Schiff fliegt dorthin.
 - Frachter an einem Handelsposten → Pendelroute zu einem anderen Posten einrichten.
 - Schürfer an einem Gürtel oder an der Basis → Pendelroute einrichten.
@@ -35,7 +36,7 @@ src/game/      reine Spiellogik, ohne DOM (testbar)
   expedition.ts Simulation Expedition (Wellen, Kampf, Abbau, Heimsprung)
   actions.ts   alles, was der Spieler tun kann
   sim.ts       fester Zeitschritt, Speichern/Laden, Offline-Fortschritt
-src/ui/        Canvas-Rendering und Seitenpanel
+src/ui/        Canvas-Rendering (render.ts), Grafiken (sprites.ts), Kamera (camera.ts), Seitenpanel
 tests/         Vitest
 scripts/       Balancing-Bots
 docs/DESIGN.md Spieldesign, Kreisläufe, Formeln, gemessenes Balancing

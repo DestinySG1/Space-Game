@@ -1,57 +1,123 @@
-// Canvas drawing for the home sector and the expedition map.
+// Canvas drawing for the home sector and the expedition map, with camera, smooth flight and effects.
 import { CONFIG } from '../game/config';
 import { shipStats } from '../game/economy';
 import { GATE, expeditionShips } from '../game/expedition';
-import { hexEq, hexLine, hexToPixel, hexesInRadius } from '../game/hex';
-import { nodeById } from '../game/state';
-import type { GameState, Hex, Ship } from '../game/types';
+import { hexDistance, hexEq, hexLine, hexToPixel, hexesInRadius } from '../game/hex';
+import { nodeAt, nodeById } from '../game/state';
+import type { Enemy, GameState, Hex, Ship } from '../game/types';
+import { clampCamera, type Camera } from './camera';
+import {
+  SHIP_COLORS, drawAsteroids, drawBackground, drawBase, drawBeam, drawCrystals, drawEnemySprite, drawGate, drawPlanet,
+  drawShipSprite, drawStation, hashId,
+} from './sprites';
 import type { UIState } from './ui-state';
 
-export const COLORS = {
-  bg: '#070b16',
-  grid: 'rgba(120,150,220,0.10)',
-  gridHover: 'rgba(140,180,255,0.18)',
+const C = {
+  grid: 'rgba(120,150,220,0.09)',
+  gridHover: 'rgba(140,180,255,0.16)',
   sel: '#ffffff',
-  base: '#5fd4ff',
-  garden: '#5fe0b0',
-  rock: '#e8a95b',
-  station: '#b48cff',
-  asteroid: '#8c94a8',
-  hauler: '#f5c15c',
-  miner: '#7ee0a1',
-  warden: '#6fb6ff',
-  enemy: '#ff5d6c',
-  shard: '#ff7bf2',
   text: '#dbe4ff',
-  dim: '#6b7799',
+  dim: '#8692b5',
   hull: '#7ee0a1',
   shield: '#6fb6ff',
+  enemy: '#ff5d6c',
+  shard: '#ff7bf2',
+  ore: '#e8a95b',
 };
 
 export interface View {
   cx: number;
   cy: number;
-  size: number;
+  size: number; // screen pixels per hex (radius)
   radius: number;
 }
 
-export function computeView(w: number, h: number, radius: number): View {
-  const size = Math.min(w / (Math.sqrt(3) * (2 * radius + 1)), h / (3 * radius + 2)) * 0.96;
-  return { cx: w / 2, cy: h / 2, size, radius };
+export interface DrawResult {
+  view: View;
+  shipPos: Map<string, { x: number; y: number }>;
+  mapRadiusPx: number;
 }
 
-const toPx = (v: View, h: Hex) => {
-  const p = hexToPixel(h, v.size);
-  return { x: v.cx + p.x, y: v.cy + p.y };
-};
-
-/** Pixel position of something moving along a path. */
-function moverPx(v: View, m: { hex: Hex; path: Hex[]; progress: number }) {
-  const a = toPx(v, m.hex);
-  if (m.path.length === 0) return { ...a, angle: -Math.PI / 2 };
-  const b = toPx(v, m.path[0]);
-  return { x: a.x + (b.x - a.x) * m.progress, y: a.y + (b.y - a.y) * m.progress, angle: Math.atan2(b.y - a.y, b.x - a.x) };
+export function computeView(w: number, h: number, radius: number, cam: Camera): View & { base: number } {
+  const base = Math.min(w / (Math.sqrt(3) * (2 * radius + 1)), h / (3 * radius + 2)) * 0.96;
+  return { cx: w / 2 + cam.x, cy: h / 2 + cam.y, size: base * cam.zoom, radius, base };
 }
+
+const world = (h: Hex) => hexToPixel(h, 1);
+const toScreen = (v: View, p: { x: number; y: number }) => ({ x: v.cx + p.x * v.size, y: v.cy + p.y * v.size });
+const hexScreen = (v: View, h: Hex) => toScreen(v, world(h));
+
+// ---- smooth visual motion ------------------------------------------------------------
+
+interface Visual {
+  x: number;
+  y: number;
+  a: number;
+  thrust: number;
+  trail: { x: number; y: number }[];
+  seen: number;
+}
+const visuals = new Map<string, Visual>();
+
+/** Exact simulated position of something moving along a hex path (world units). */
+function simPos(m: { hex: Hex; path: Hex[]; progress: number }) {
+  const a = world(m.hex);
+  if (!m.path.length) return { ...a, moving: false, dir: 0 };
+  const b = world(m.path[0]);
+  return { x: a.x + (b.x - a.x) * m.progress, y: a.y + (b.y - a.y) * m.progress, moving: true, dir: Math.atan2(b.y - a.y, b.x - a.x) };
+}
+
+function lerpAngle(a: number, b: number, k: number) {
+  const d = Math.atan2(Math.sin(b - a), Math.cos(b - a));
+  return a + d * k;
+}
+
+/**
+ * Ease the drawn position toward the simulated one. Idle things circle their hex slowly,
+ * moving things face their direction and leave a short engine trail.
+ */
+function animate(key: string, m: { hex: Hex; path: Hex[]; progress: number }, now: number, dt: number, orbit: number, orbitSpeed: number): Visual {
+  const p = simPos(m);
+  const seed = hashId(key);
+  let tx = p.x;
+  let ty = p.y;
+  let ta = p.dir;
+  if (!p.moving && orbit > 0) {
+    const dirSign = seed % 2 ? 1 : -1;
+    const phase = ((seed % 1000) / 1000) * Math.PI * 2 + (now / 1000) * orbitSpeed * dirSign;
+    tx += Math.cos(phase) * orbit;
+    ty += Math.sin(phase) * orbit;
+    ta = phase + (Math.PI / 2) * dirSign;
+  }
+  let v = visuals.get(key);
+  if (!v || Math.hypot(v.x - tx, v.y - ty) > 3) {
+    v = { x: tx, y: ty, a: ta, thrust: 0, trail: [], seen: now };
+    visuals.set(key, v);
+  }
+  const k = 1 - Math.exp(-dt * 6);
+  const px = v.x;
+  const py = v.y;
+  v.x += (tx - v.x) * k;
+  v.y += (ty - v.y) * k;
+  const speed = Math.hypot(v.x - px, v.y - py) / Math.max(dt, 1e-3);
+  if (speed > 0.02) ta = Math.atan2(v.y - py, v.x - px);
+  v.a = lerpAngle(v.a, ta, 1 - Math.exp(-dt * 8));
+  v.thrust += ((p.moving ? 1 : 0.15) - v.thrust) * (1 - Math.exp(-dt * 4));
+  if (p.moving) {
+    v.trail.push({ x: v.x, y: v.y });
+    if (v.trail.length > 26) v.trail.shift();
+  } else if (v.trail.length) {
+    v.trail.shift();
+  }
+  v.seen = now;
+  return v;
+}
+
+function pruneVisuals(now: number) {
+  for (const [k, v] of visuals) if (now - v.seen > 2000) visuals.delete(k);
+}
+
+// ---- shared pieces ---------------------------------------------------------------
 
 function hexPath(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
   ctx.beginPath();
@@ -65,147 +131,122 @@ function hexPath(ctx: CanvasRenderingContext2D, x: number, y: number, size: numb
   ctx.closePath();
 }
 
-let starCache: { w: number; h: number; stars: [number, number, number][] } | null = null;
-function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  if (!starCache || starCache.w !== w || starCache.h !== h) {
-    let seed = 7;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    const stars: [number, number, number][] = [];
-    for (let i = 0; i < (w * h) / 2500; i++) stars.push([rnd() * w, rnd() * h, rnd()]);
-    starCache = { w, h, stars };
-  }
-  for (const [x, y, b] of starCache.stars) {
-    ctx.fillStyle = `rgba(200,215,255,${0.15 + b * 0.5})`;
-    ctx.fillRect(x, y, b > 0.9 ? 2 : 1, b > 0.9 ? 2 : 1);
-  }
-}
-
 function drawGrid(ctx: CanvasRenderingContext2D, v: View, ui: UIState) {
+  ctx.lineWidth = 1;
   for (const h of hexesInRadius(v.radius)) {
-    const p = toPx(v, h);
-    hexPath(ctx, p.x, p.y, v.size * 0.97);
+    const p = hexScreen(v, h);
+    hexPath(ctx, p.x, p.y, v.size * 0.98);
     if (ui.hoverHex && hexEq(ui.hoverHex, h)) {
-      ctx.fillStyle = COLORS.gridHover;
+      ctx.fillStyle = C.gridHover;
       ctx.fill();
     }
-    ctx.strokeStyle = COLORS.grid;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = C.grid;
     ctx.stroke();
   }
 }
 
 function bar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, frac: number, color: string) {
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(x - w / 2, y, w, 3);
   ctx.fillStyle = color;
   ctx.fillRect(x - w / 2, y, w * Math.max(0, Math.min(1, frac)), 3);
 }
 
-function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color = COLORS.dim, px = 11) {
+function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color = C.dim, px = 11) {
   ctx.font = `${px}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(5,8,18,0.85)';
+  ctx.strokeText(text, x, y);
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
 }
 
-function drawShip(ctx: CanvasRenderingContext2D, s: GameState, ship: Ship, x: number, y: number, angle: number, r: number, selected: boolean) {
-  const color = COLORS[ship.type];
-  ctx.save();
-  ctx.translate(x, y);
-  if (selected) {
-    ctx.strokeStyle = COLORS.sel;
-    ctx.lineWidth = 1.5;
+function drawTrail(ctx: CanvasRenderingContext2D, v: View, vis: Visual, color: string, width: number) {
+  if (vis.trail.length < 2) return;
+  ctx.lineCap = 'round';
+  for (let i = 1; i < vis.trail.length; i++) {
+    const a = toScreen(v, vis.trail[i - 1]);
+    const b = toScreen(v, vis.trail[i]);
+    ctx.globalAlpha = (i / vis.trail.length) * 0.5;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width * (i / vis.trail.length);
     ctx.beginPath();
-    ctx.arc(0, 0, r * 1.7, 0, Math.PI * 2);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
     ctx.stroke();
   }
-  ctx.rotate(angle + Math.PI / 2);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  if (ship.type === 'warden') {
-    ctx.moveTo(0, -r * 1.2);
-    ctx.lineTo(r, r * 0.4);
-    ctx.lineTo(r * 0.4, r);
-    ctx.lineTo(-r * 0.4, r);
-    ctx.lineTo(-r, r * 0.4);
-  } else if (ship.type === 'miner') {
-    ctx.moveTo(0, -r);
-    ctx.lineTo(r, 0);
-    ctx.lineTo(r * 0.6, r);
-    ctx.lineTo(-r * 0.6, r);
-    ctx.lineTo(-r, 0);
-  } else {
-    ctx.rect(-r * 0.7, -r, r * 1.4, r * 2);
-  }
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-
-  const st = shipStats(s, ship.type);
-  if (ship.location === 'expedition' || ship.hull < st.hull) {
-    bar(ctx, x, y + r * 1.5, r * 3, ship.hull / st.hull, COLORS.hull);
-    if (st.shield > 0) bar(ctx, x, y + r * 1.5 + 4, r * 3, ship.shield / st.shield, COLORS.shield);
-  }
-}
-
-/** Ships in the same hex are spread on a small ring so all stay clickable. */
-export function shipPositions(v: View, ships: Ship[]): Map<string, { x: number; y: number; angle: number }> {
-  const out = new Map<string, { x: number; y: number; angle: number }>();
-  const groups = new Map<string, Ship[]>();
-  for (const sh of ships) {
-    const key = sh.path.length ? `m${sh.id}` : `${sh.hex.q},${sh.hex.r}`;
-    groups.set(key, [...(groups.get(key) ?? []), sh]);
-  }
-  for (const list of groups.values()) {
-    list.forEach((sh, i) => {
-      const p = moverPx(v, sh);
-      const off = sh.path.length ? 0 : v.size * 0.5;
-      const a = (i / Math.max(1, list.length)) * Math.PI * 2 + Math.PI / 4;
-      const spread = list.length > 1 || !sh.path.length ? off : 0;
-      out.set(sh.id, { x: p.x + Math.cos(a) * spread, y: p.y + Math.sin(a) * spread, angle: p.angle });
-    });
-  }
-  return out;
+  ctx.globalAlpha = 1;
 }
 
 function drawPreview(ctx: CanvasRenderingContext2D, v: View, ui: UIState, ship: Ship | undefined) {
   if (!ship || !ui.hoverHex) return;
   const from = ship.path.length ? ship.path[0] : ship.hex;
   if (hexEq(from, ui.hoverHex)) return;
-  ctx.setLineDash([4, 5]);
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.setLineDash([4, 6]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  const a = toPx(v, from);
+  const a = hexScreen(v, from);
   ctx.moveTo(a.x, a.y);
   for (const h of hexLine(from, ui.hoverHex)) {
-    const p = toPx(v, h);
+    const p = hexScreen(v, h);
     ctx.lineTo(p.x, p.y);
   }
   ctx.stroke();
   ctx.setLineDash([]);
+  const end = hexScreen(v, ui.hoverHex);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.beginPath();
+  ctx.arc(end.x, end.y, v.size * 0.2, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
-export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number) {
-  const v = computeView(w, h, CONFIG.sector.radius);
-  ctx.fillStyle = COLORS.bg;
-  ctx.fillRect(0, 0, w, h);
-  drawStars(ctx, w, h);
-  drawGrid(ctx, v, ui);
+function drawShipAt(ctx: CanvasRenderingContext2D, s: GameState, v: View, ship: Ship, vis: Visual, r: number, selected: boolean, now: number, showBars: boolean) {
+  const p = toScreen(v, vis);
+  drawTrail(ctx, v, vis, SHIP_COLORS[ship.type], Math.max(1.5, r * 0.35));
+  if (selected) {
+    ctx.strokeStyle = C.sel;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r * 1.6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  drawShipSprite(ctx, ship.type, p.x, p.y, vis.a, r, vis.thrust, now);
+  const st = shipStats(s, ship.type);
+  if (showBars || selected || ship.hull < st.hull - 1 || ship.shield < st.shield - 1) {
+    bar(ctx, p.x, p.y + r * 1.3, r * 2.6, ship.hull / st.hull, C.hull);
+    if (st.shield > 0) bar(ctx, p.x, p.y + r * 1.3 + 4, r * 2.6, ship.shield / st.shield, C.shield);
+  }
+  return p;
+}
+
+// ---- home sector ------------------------------------------------------------------
+
+export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number, dt: number): DrawResult {
+  const cam = ui.cams.home;
+  const v0 = computeView(w, h, CONFIG.sector.radius, cam);
+  const mapRadiusPx = v0.base * (CONFIG.sector.radius + 1) * 1.6;
+  clampCamera(cam, mapRadiusPx);
+  const v = computeView(w, h, CONFIG.sector.radius, cam);
   const z = v.size;
+  drawBackground(ctx, w, h, cam.x, cam.y, 'home', '#060a15');
+  drawGrid(ctx, v, ui);
   const ships = s.ships.filter((x) => x.location === 'home');
 
   // shuttle routes
-  ctx.setLineDash([2, 6]);
+  ctx.setLineDash([2, 7]);
   for (const sh of ships) {
     if (!sh.shuttle) continue;
     const a = nodeById(s, sh.shuttle.a);
     const b = nodeById(s, sh.shuttle.b);
     if (!a || !b) continue;
-    const pa = toPx(v, a.hex);
-    const pb = toPx(v, b.hex);
-    ctx.strokeStyle = COLORS[sh.type] + '66';
+    const pa = hexScreen(v, a.hex);
+    const pb = hexScreen(v, b.hex);
+    ctx.strokeStyle = SHIP_COLORS[sh.type] + '55';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
@@ -214,149 +255,169 @@ export function drawHome(ctx: CanvasRenderingContext2D, s: GameState, ui: UIStat
   }
   ctx.setLineDash([]);
 
+  // nodes
   for (const n of s.nodes) {
-    const p = toPx(v, n.hex);
-    const selected = ui.selNode === n.id;
-    if (selected) {
-      hexPath(ctx, p.x, p.y, z * 0.97);
-      ctx.strokeStyle = COLORS.sel;
+    const p = hexScreen(v, n.hex);
+    if (p.x < -z * 2 || p.y < -z * 2 || p.x > w + z * 2 || p.y > h + z * 2) continue;
+    if (ui.selNode === n.id) {
+      hexPath(ctx, p.x, p.y, z * 0.98);
+      ctx.strokeStyle = C.sel;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
-    if (n.kind === 'base') {
-      for (const [rr, al] of [[0.42, 1], [0.6, 0.5]] as const) {
-        ctx.strokeStyle = COLORS.base;
-        ctx.globalAlpha = al;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, z * rr, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = COLORS.base;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, z * 0.16, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (n.kind === 'planet') {
-      const col = n.planetType === 'garden' ? COLORS.garden : COLORS.rock;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, z * 0.38, 0, Math.PI * 2);
+    if (n.kind === 'base') drawBase(ctx, p.x, p.y, z * 0.5, now);
+    else if (n.kind === 'planet') {
+      drawPlanet(ctx, p.x, p.y, z * 0.4, n.id, n.planetType ?? 'rock', n.level > 0);
       if (n.level > 0) {
-        const g = ctx.createRadialGradient(p.x - z * 0.12, p.y - z * 0.12, z * 0.05, p.x, p.y, z * 0.4);
-        g.addColorStop(0, col);
-        g.addColorStop(1, col + '44');
-        ctx.fillStyle = g;
-        ctx.fill();
-        label(ctx, String(n.level), p.x, p.y - 7, '#06101e', 13);
-      } else {
-        ctx.strokeStyle = col + '88';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([3, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    } else if (n.kind === 'station') {
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(Math.PI / 4);
-      ctx.strokeStyle = COLORS.station;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-z * 0.26, -z * 0.26, z * 0.52, z * 0.52);
-      ctx.restore();
-      bar(ctx, p.x, p.y + z * 0.45, z * 0.8, n.stock / CONFIG.station.stockCap, COLORS.station);
-    } else if (n.kind === 'asteroid') {
-      ctx.fillStyle = COLORS.asteroid;
-      for (const [dx, dy, r] of [[-0.2, -0.1, 0.12], [0.15, -0.18, 0.09], [0.05, 0.14, 0.14], [0.25, 0.1, 0.07], [-0.22, 0.18, 0.08]]) {
+        ctx.fillStyle = 'rgba(6,10,21,0.85)';
         ctx.beginPath();
-        ctx.arc(p.x + dx * z, p.y + dy * z, r * z, 0, Math.PI * 2);
+        ctx.arc(p.x + z * 0.32, p.y - z * 0.32, Math.max(7, z * 0.14), 0, Math.PI * 2);
         ctx.fill();
+        ctx.font = `600 ${Math.max(9, z * 0.16)}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = n.planetType === 'garden' ? '#5fe0b0' : '#e8a95b';
+        ctx.fillText(String(n.level), p.x + z * 0.32, p.y - z * 0.31);
       }
-      bar(ctx, p.x, p.y + z * 0.45, z * 0.8, n.ore / CONFIG.asteroid.oreMax, COLORS.rock);
-    }
-    label(ctx, n.name, p.x, p.y + z * 0.56, selected ? COLORS.text : COLORS.dim, Math.max(9, Math.min(12, z * 0.28)));
+    } else if (n.kind === 'station') drawStation(ctx, p.x, p.y, z * 0.42, now, n.stock / CONFIG.station.stockCap, hashId(n.id) % 10);
+    else if (n.kind === 'asteroid') drawAsteroids(ctx, p.x, p.y, z * 0.5, now, hashId(n.id), n.ore / CONFIG.asteroid.oreMax);
+  }
+
+  // mining beams: a miner sitting on a belt with room in its hold
+  for (const sh of ships) {
+    if (sh.type !== 'miner' || sh.path.length) continue;
+    const n = nodeAt(s, sh.hex);
+    if (n?.kind !== 'asteroid' || n.ore < 1 || sh.cargo >= shipStats(s, 'miner').cargoHome - 1e-6) continue;
+    const vis = visuals.get(`h:${sh.id}`);
+    if (!vis) continue;
+    const a = toScreen(v, vis);
+    const b = hexScreen(v, n.hex);
+    drawBeam(ctx, a.x, a.y, b.x, b.y, C.ore, Math.max(1, z * 0.04), now);
   }
 
   drawPreview(ctx, v, ui, ships.find((x) => x.id === ui.selShip));
-  const pos = shipPositions(v, ships);
+  const shipPos = new Map<string, { x: number; y: number }>();
+  const r = Math.max(5, z * 0.17);
   for (const sh of ships) {
-    const p = pos.get(sh.id)!;
-    drawShip(ctx, s, sh, p.x, p.y, p.angle, Math.max(4, z * 0.14), ui.selShip === sh.id);
+    const vis = animate(`h:${sh.id}`, sh, now, dt, 0.42, 0.35);
+    shipPos.set(sh.id, drawShipAt(ctx, s, v, sh, vis, r, ui.selShip === sh.id, now, false));
   }
-  return { view: v, shipPos: pos };
+
+  if (z > 20) {
+    for (const n of s.nodes) {
+      const p = hexScreen(v, n.hex);
+      label(ctx, n.name, p.x, p.y + z * 0.62, ui.selNode === n.id ? C.text : C.dim, Math.max(10, Math.min(13, z * 0.22)));
+    }
+  }
+  pruneVisuals(now);
+  return { view: v, shipPos, mapRadiusPx };
 }
 
-export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number) {
-  const v = computeView(w, h, CONFIG.expedition.radius);
-  const ex = s.expedition!;
-  ctx.fillStyle = '#0b0714';
-  ctx.fillRect(0, 0, w, h);
-  drawStars(ctx, w, h);
-  drawGrid(ctx, v, ui);
-  const z = v.size;
+// ---- expedition ------------------------------------------------------------------
 
-  // the gate
-  const g = toPx(v, GATE);
-  ctx.save();
-  ctx.translate(g.x, g.y);
-  ctx.rotate(now / 1500);
-  for (let i = 0; i < 3; i++) {
-    ctx.strokeStyle = `rgba(95,212,255,${0.9 - i * 0.25})`;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(0, 0, z * (0.25 + i * 0.13), i, i + Math.PI * 1.3);
-    ctx.stroke();
-  }
-  ctx.restore();
-  label(ctx, 'Sprungtor', g.x, g.y + z * 0.56, COLORS.base, 11);
-
-  for (const d of ex.deposits) {
-    const p = toPx(v, d.hex);
-    const alpha = d.shards > 0 ? 1 : 0.2;
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = COLORS.shard;
-    for (const [dx, dy, s2] of [[0, -0.05, 0.3], [-0.16, 0.08, 0.2], [0.15, 0.1, 0.22]]) {
-      ctx.beginPath();
-      ctx.moveTo(p.x + dx * z, p.y + (dy - s2) * z);
-      ctx.lineTo(p.x + (dx + s2 * 0.4) * z, p.y + dy * z);
-      ctx.lineTo(p.x + dx * z, p.y + (dy + s2 * 0.6) * z);
-      ctx.lineTo(p.x + (dx - s2 * 0.4) * z, p.y + dy * z);
-      ctx.closePath();
-      ctx.fill();
+function nearestOf<T extends { hex: Hex }>(list: T[], from: Hex, range: number): T | undefined {
+  let best: T | undefined;
+  let bestD = Infinity;
+  for (const x of list) {
+    const d = hexDistance(x.hex, from);
+    if (d <= range && d < bestD) {
+      best = x;
+      bestD = d;
     }
-    ctx.globalAlpha = 1;
-    label(ctx, d.shards > 0 ? `${Math.floor(d.shards)}` : 'leer', p.x, p.y + z * 0.5, d.shards > 0 ? COLORS.shard : COLORS.dim, 11);
   }
+  return best;
+}
 
-  for (const en of ex.enemies) {
-    const p = moverPx(v, en);
-    const r = z * (en.type === 'colossus' ? 0.26 : 0.15);
-    ctx.fillStyle = COLORS.enemy;
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y - r);
-    ctx.lineTo(p.x + r, p.y);
-    ctx.lineTo(p.x, p.y + r);
-    ctx.lineTo(p.x - r, p.y);
-    ctx.closePath();
-    ctx.fill();
-    bar(ctx, p.x, p.y + r + 3, r * 2.4, en.hp / en.maxHp, COLORS.enemy);
-  }
+export function drawExpedition(ctx: CanvasRenderingContext2D, s: GameState, ui: UIState, w: number, h: number, now: number, dt: number): DrawResult {
+  const ex = s.expedition!;
+  const cam = ui.cams.expedition;
+  const v0 = computeView(w, h, CONFIG.expedition.radius, cam);
+  const mapRadiusPx = v0.base * (CONFIG.expedition.radius + 1) * 1.6;
+  clampCamera(cam, mapRadiusPx);
+  const v = computeView(w, h, CONFIG.expedition.radius, cam);
+  const z = v.size;
+  drawBackground(ctx, w, h, cam.x, cam.y, 'anomaly', '#0b0614');
+  drawGrid(ctx, v, ui);
+
+  const g = hexScreen(v, GATE);
+  drawGate(ctx, g.x, g.y, z * 0.55, now);
+
+  ex.deposits.forEach((d, i) => {
+    const p = hexScreen(v, d.hex);
+    drawCrystals(ctx, p.x, p.y, z * 0.45, now, i * 977 + 13, d.shards > 0);
+  });
 
   const ships = expeditionShips(s);
-  drawPreview(ctx, v, ui, ships.find((x) => x.id === ui.selShip));
-  const pos = shipPositions(v, ships);
+  const shipVis = new Map<string, Visual>();
+  for (const sh of ships) shipVis.set(sh.id, animate(`x:${sh.id}`, sh, now, dt, 0.32, 0.5));
+  const enemyVis = new Map<string, Visual>();
+  for (const en of ex.enemies) enemyVis.set(en.id, animate(`e:${en.id}`, en, now, dt, 0.12, 0.8));
+
+  // beams: wardens fire at the nearest enemy in range, enemies at the nearest ship when adjacent,
+  // miners draw shards from the deposit under them
   for (const sh of ships) {
-    const p = pos.get(sh.id)!;
-    drawShip(ctx, s, sh, p.x, p.y, p.angle, Math.max(5, z * 0.16), ui.selShip === sh.id);
-    if (sh.shards >= 1) label(ctx, `◆${Math.floor(sh.shards)}`, p.x, p.y - z * 0.5, COLORS.shard, 10);
+    const sv = toScreen(v, shipVis.get(sh.id)!);
+    if (sh.type === 'warden') {
+      const target = nearestOf(ex.enemies, sh.hex, 1);
+      if (target) {
+        const tv = toScreen(v, enemyVis.get(target.id)!);
+        drawBeam(ctx, sv.x, sv.y, tv.x, tv.y, '#8fd0ff', Math.max(1.5, z * 0.05), now);
+      }
+    }
+    if (sh.type === 'miner' && !sh.path.length) {
+      const dep = ex.deposits.find((d) => hexEq(d.hex, sh.hex) && d.shards > 0);
+      if (dep && sh.shards < shipStats(s, 'miner').cargoExp - 1e-6) {
+        const dp = hexScreen(v, dep.hex);
+        drawBeam(ctx, sv.x, sv.y, dp.x, dp.y, C.shard, Math.max(1, z * 0.04), now);
+      }
+    }
+  }
+  for (const en of ex.enemies) {
+    if (en.path.length) continue;
+    const target = nearestOf(ships, en.hex, 1);
+    if (!target) continue;
+    const a = toScreen(v, enemyVis.get(en.id)!);
+    const b = toScreen(v, shipVis.get(target.id)!);
+    drawBeam(ctx, a.x, a.y, b.x, b.y, C.enemy, Math.max(1, z * 0.035), now);
+  }
+
+  for (const en of ex.enemies) drawEnemy(ctx, v, en, enemyVis.get(en.id)!, now);
+
+  drawPreview(ctx, v, ui, ships.find((x) => x.id === ui.selShip));
+  const shipPos = new Map<string, { x: number; y: number }>();
+  const r = Math.max(6, z * 0.19);
+  for (const sh of ships) {
+    const p = drawShipAt(ctx, s, v, sh, shipVis.get(sh.id)!, r, ui.selShip === sh.id, now, false);
+    shipPos.set(sh.id, p);
+    if (sh.shards >= 1) label(ctx, `◆ ${Math.floor(sh.shards)}`, p.x, p.y - r * 2.4, C.shard, 11);
+  }
+
+  if (z > 20) {
+    label(ctx, 'Sprungtor', g.x, g.y + z * 0.62, '#5fd4ff', 11);
+    for (const d of ex.deposits) {
+      const p = hexScreen(v, d.hex);
+      label(ctx, d.shards > 0 ? `${Math.floor(d.shards)}` : 'leer', p.x, p.y + z * 0.55, d.shards > 0 ? C.shard : C.dim, 11);
+    }
   }
 
   // collapse warning
   const left = ex.duration - ex.elapsed;
   if (left < CONFIG.expedition.collapseWarning) {
     const pulse = 0.25 + 0.25 * Math.sin(now / 200);
-    ctx.strokeStyle = `rgba(255,93,108,${pulse})`;
-    ctx.lineWidth = 10;
-    ctx.strokeRect(5, 5, w - 10, h - 10);
+    const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
+    vg.addColorStop(0, 'rgba(255,40,70,0)');
+    vg.addColorStop(1, `rgba(255,40,70,${pulse})`);
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
   }
-  return { view: v, shipPos: pos };
+  pruneVisuals(now);
+  return { view: v, shipPos, mapRadiusPx };
+}
+
+function drawEnemy(ctx: CanvasRenderingContext2D, v: View, en: Enemy, vis: Visual, now: number) {
+  const p = toScreen(v, vis);
+  const r = v.size * (en.type === 'colossus' ? 0.3 : 0.17);
+  drawTrail(ctx, v, vis, '#ff5d6c', Math.max(1, r * 0.3));
+  drawEnemySprite(ctx, en.type, p.x, p.y, r, now, hashId(en.id) % 7);
+  bar(ctx, p.x, p.y + r + 4, r * 2.4, en.hp / en.maxHp, C.enemy);
 }

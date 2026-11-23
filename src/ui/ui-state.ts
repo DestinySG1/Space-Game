@@ -1,4 +1,5 @@
 import type { Hex } from '../game/types';
+import { newCamera, type Camera } from './camera';
 
 export type Tab = 'select' | 'yard' | 'research' | 'expedition' | 'log';
 
@@ -13,6 +14,7 @@ export interface UIState {
   launchTier: number;
   toast: { msg: string; ok: boolean; until: number } | null;
   confirmReset: boolean;
+  cams: { home: Camera; expedition: Camera };
 }
 
 export const initialUI = (): UIState => ({
@@ -26,4 +28,5 @@ export const initialUI = (): UIState => ({
   launchTier: 1,
   toast: null,
   confirmReset: false,
+  cams: { home: newCamera(), expedition: newCamera() },
 });
